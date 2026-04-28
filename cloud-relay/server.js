@@ -5,6 +5,7 @@ const PORT = Number(process.env.PORT || 3000);
 const ADMIN_USER = process.env.ADMIN_USER || "admin";
 const ADMIN_PASS = process.env.ADMIN_PASS || "nova2026";
 const ROBOT_TOKEN = process.env.ROBOT_TOKEN || "change-me-robot-token";
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 
 let robot = {
   online: false,
@@ -25,6 +26,28 @@ const facility = {
 };
 const commandQueue = [];
 const events = [];
+const sessions = new Map();
+const users = new Map();
+let brandLogoDataUrl = process.env.BRAND_LOGO_DATA_URL || "";
+
+function passwordHash(password, salt = crypto.randomBytes(16).toString("hex")) {
+  const hash = crypto.pbkdf2Sync(String(password || ""), salt, 120000, 32, "sha256").toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, stored) {
+  const [salt, hash] = String(stored || "").split(":");
+  if (!salt || !hash) return false;
+  const candidate = passwordHash(password, salt).split(":")[1];
+  return safeEqual(candidate, hash);
+}
+
+users.set(ADMIN_USER, {
+  username: ADMIN_USER,
+  role: "admin",
+  passwordHash: passwordHash(ADMIN_PASS),
+  createdAt: Date.now(),
+});
 
 const residentColumns = [
   "resident_id",
@@ -79,15 +102,73 @@ function isAdmin(req) {
   return safeEqual(decoded, `${ADMIN_USER}:${ADMIN_PASS}`);
 }
 
+function parseCookies(req) {
+  return Object.fromEntries(
+    String(req.headers.cookie || "")
+      .split(";")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const idx = part.indexOf("=");
+        return idx < 0 ? [part, ""] : [part.slice(0, idx), decodeURIComponent(part.slice(idx + 1))];
+      })
+  );
+}
+
+function currentUser(req) {
+  const sid = parseCookies(req).nova_session;
+  const session = sid ? sessions.get(sid) : null;
+  if (!session || session.expiresAt < Date.now()) {
+    if (sid) sessions.delete(sid);
+    return null;
+  }
+  return users.get(session.username) || null;
+}
+
+function createSession(res, username) {
+  const sid = crypto.createHmac("sha256", SESSION_SECRET).update(`${username}:${crypto.randomUUID()}`).digest("hex");
+  sessions.set(sid, { username, createdAt: Date.now(), expiresAt: Date.now() + 1000 * 60 * 60 * 12 });
+  res.setHeader("set-cookie", `nova_session=${encodeURIComponent(sid)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=43200`);
+}
+
 function isRobot(req) {
   return safeEqual(req.headers["x-robot-token"], ROBOT_TOKEN);
 }
 
 function requireAdmin(req, res) {
-  if (isAdmin(req)) return true;
+  if (currentUser(req) || isAdmin(req)) return true;
+  if (String(req.url || "").startsWith("/api/")) return sendJson(res, 401, { ok: false, error: "login required" });
+  res.writeHead(302, { location: "/login", "cache-control": "no-store" });
+  res.end();
+  return false;
+}
+
+function requireRole(req, res, role = "admin") {
+  const user = currentUser(req);
+  if (user?.role === role || user?.role === "admin" || isAdmin(req)) return user || users.get(ADMIN_USER);
+  sendJson(res, 403, { ok: false, error: "admin role required" });
+  return null;
+}
+
+function loginPage(error = "") {
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZOX Robotics Sign In</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#0d5790,#05152b 55%,#020814);font-family:Inter,system-ui,Segoe UI,sans-serif;color:white}.card{width:min(430px,92vw);background:#ffffff10;border:1px solid #ffffff26;border-radius:24px;padding:28px;box-shadow:0 24px 70px #0008}.logo{width:96px;height:96px;border-radius:26px;margin:0 auto 16px;background:#06172e;border:2px solid #10c6e7;display:grid;place-items:center;overflow:hidden}.logo img{width:100%;height:100%;object-fit:cover}.logo span{color:#1bd6ee;font-size:30px;font-weight:950}.tag{text-align:center;color:#31d7ef;font-size:11px;letter-spacing:2.4px;font-weight:900}.field{width:100%;border:1px solid #ffffff2e;background:#ffffff14;color:white;border-radius:14px;padding:14px;margin:8px 0;font:inherit}.btn{width:100%;border:0;border-radius:14px;background:#12bee5;color:#03162d;padding:14px;font-weight:950;margin-top:12px;cursor:pointer}.err{background:#ff4d4d26;color:#ffd6d6;border:1px solid #ff8a8a55;padding:10px;border-radius:12px;margin:12px 0}.muted{color:#bed0e3;font-size:13px;text-align:center}</style></head><body><form class="card" method="post" action="/login">
+<div class="logo">${brandLogoDataUrl ? `<img src="${brandLogoDataUrl}" alt="ZOX Robotics">` : "<span>ZOX</span>"}</div><div class="tag">SMART ROBOTS. BETTER CARE.</div><h1 style="text-align:center;margin:14px 0 6px">Care Cloud Sign In</h1><p class="muted">Authorized clinic staff only.</p>${error ? `<div class="err">${cleanText(error)}</div>` : ""}
+<input class="field" name="username" placeholder="Username" autocomplete="username" autofocus><input class="field" name="password" placeholder="Password" type="password" autocomplete="current-password"><button class="btn">Sign In</button></form></body></html>`;
+}
+
+function parseForm(body) {
+  return Object.fromEntries(
+    String(body || "").split("&").filter(Boolean).map((part) => {
+      const [key, value = ""] = part.split("=");
+      return [decodeURIComponent(key.replace(/\+/g, " ")), decodeURIComponent(value.replace(/\+/g, " "))];
+    })
+  );
+}
+
+function legacyAuthChallenge(res) {
   res.writeHead(401, { "www-authenticate": 'Basic realm="Nova Cloud"', "cache-control": "no-store" });
   res.end("Login required");
-  return false;
 }
 
 function log(type, detail = {}) {
@@ -167,16 +248,16 @@ function mergedCare() {
   };
 }
 
-function page() {
+function page(user = users.get(ADMIN_USER)) {
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ZOX Robotics Care Cloud</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#f5f8fb;color:#101a33;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}.app{display:grid;grid-template-columns:260px 1fr;min-height:100vh}.side{background:linear-gradient(180deg,#051b34,#092544);color:white;padding:22px 16px;display:flex;flex-direction:column;gap:18px}.brand{display:flex;gap:12px;align-items:center}.logo{width:58px;height:58px;border-radius:16px;background:radial-gradient(circle at 50% 40%,#123963,#06172e 62%);border:2px solid #10c6e7;box-shadow:0 0 22px #10c6e755;display:grid;place-items:center;color:#1bd6ee;font-weight:950;font-size:22px;letter-spacing:-1px}.brand b{font-size:20px}.tag{color:#36d7ee;font-size:10px;letter-spacing:2.2px;font-weight:900}.muted{color:#728198;font-size:13px}.side .muted{color:#b7c6d8}.nav{display:grid;gap:7px}.nav a{padding:13px 14px;border-radius:11px;color:white;text-decoration:none;cursor:pointer;font-weight:760}.nav a.active,.nav a:hover{background:#1d66ca}.sidebox{margin-top:auto;background:#ffffff10;border:1px solid #ffffff1f;border-radius:16px;padding:16px}.top{height:78px;background:white;border-bottom:1px solid #dfe7f1;display:flex;align-items:center;justify-content:space-between;padding:0 26px}.top h1{margin:0;font-size:24px}.content{padding:18px}.view{display:none}.view.active{display:block}.grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}.grid3{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:14px;margin-top:14px}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{background:white;border:1px solid #dfe7f1;border-radius:16px;padding:16px;box-shadow:0 10px 28px #3451a012}.card h2{font-size:16px;margin:0 0 12px}.tile{border:0;border-radius:18px;min-height:145px;background:white;color:#08142f;box-shadow:0 12px 32px #2f4d7a18;font-weight:900;font-size:18px;cursor:pointer;padding:20px 12px}.tile span{display:grid;place-items:center;width:64px;height:64px;border-radius:50%;margin:0 auto 14px;color:white;font-size:22px}.green{background:#2f9e57}.blue{background:#2374e1}.yellow{background:#f2b51e}.red{background:#e95050}.purple{background:#8a55de}.cyan{background:#10bcd7}.status{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.stat{border:1px solid #e1e9f2;border-radius:14px;padding:14px}.stat b{font-size:26px;display:block}.pill{border-radius:999px;padding:5px 9px;font-size:12px;font-weight:850;display:inline-block}.ok{background:#e5f7e9;color:#238044}.bad{background:#ffe6e6;color:#c93131}.warn{background:#fff2d9;color:#b06a00}.low{background:#e8f1ff;color:#1e67c9}.row{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;border-bottom:1px solid #edf2f7;padding:11px 0}.dot{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;color:white;font-weight:900}.cmd{border:1px solid #d7e1ee;background:white;color:#14213d;border-radius:999px;padding:11px 16px;font-weight:850;cursor:pointer;margin:4px}.cmd.primary{background:#2374e1;color:white;border-color:#2374e1}.cmd.danger{background:#e94d4d;color:white;border-color:#e94d4d}.cmd:disabled{opacity:.45;cursor:not-allowed}.field{width:100%;border:1px solid #d7e1ee;border-radius:12px;padding:12px;margin:6px 0;font:inherit}.map{height:280px;border-radius:14px;background:#eef5ff;border:1px solid #dce7f4;position:relative;overflow:hidden}.map.empty,.empty{display:grid;place-items:center;color:#667895;text-align:center;min-height:110px;border:1px dashed #cbd8e8;border-radius:14px;background:#f9fbfe;padding:18px}.room{position:absolute;border:2px solid #cbd9ea;border-radius:9px;padding:13px;color:#52627a;background:#ffffffbb}.pin{position:absolute;width:34px;height:34px;border:0;border-radius:50%;display:grid;place-items:center;color:white;font-weight:900;cursor:pointer}.camera{display:none;margin-top:12px}.camera img{width:100%;max-height:360px;object-fit:contain;background:#071426;border-radius:12px}.table{width:100%;border-collapse:collapse}.table td,.table th{text-align:left;padding:12px;border-bottom:1px solid #edf2f7;vertical-align:top}.small{font-size:12px}.toast{position:fixed;right:18px;bottom:18px;background:#071b34;color:white;padding:12px 16px;border-radius:12px;box-shadow:0 12px 28px #0003;display:none}@media(max-width:1000px){.app{grid-template-columns:1fr}.side{display:none}.top{height:auto;padding:16px;align-items:flex-start;flex-direction:column}.grid5,.grid3,.status,.two{grid-template-columns:1fr}.content{padding:12px}}
+*{box-sizing:border-box}body{margin:0;background:#f5f8fb;color:#101a33;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}.app{display:grid;grid-template-columns:260px 1fr;min-height:100vh}.side{background:linear-gradient(180deg,#051b34,#092544);color:white;padding:22px 16px;display:flex;flex-direction:column;gap:18px}.brand{display:flex;gap:12px;align-items:center}.logo{width:64px;height:64px;border-radius:16px;background:radial-gradient(circle at 50% 40%,#123963,#06172e 62%);border:2px solid #10c6e7;box-shadow:0 0 22px #10c6e755;display:grid;place-items:center;color:#1bd6ee;font-weight:950;font-size:22px;letter-spacing:-1px;overflow:hidden}.logo img{width:100%;height:100%;object-fit:cover}.brand b{font-size:20px}.tag{color:#36d7ee;font-size:10px;letter-spacing:2.2px;font-weight:900}.muted{color:#728198;font-size:13px}.side .muted{color:#b7c6d8}.nav{display:grid;gap:7px}.nav a{padding:13px 14px;border-radius:11px;color:white;text-decoration:none;cursor:pointer;font-weight:760}.nav a.active,.nav a:hover{background:#1d66ca}.sidebox{margin-top:auto;background:#ffffff10;border:1px solid #ffffff1f;border-radius:16px;padding:16px}.top{height:78px;background:white;border-bottom:1px solid #dfe7f1;display:flex;align-items:center;justify-content:space-between;padding:0 26px}.top h1{margin:0;font-size:24px}.topRight{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.content{padding:18px}.view{display:none}.view.active{display:block}.grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}.grid3{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:14px;margin-top:14px}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{background:white;border:1px solid #dfe7f1;border-radius:16px;padding:16px;box-shadow:0 10px 28px #3451a012}.card h2{font-size:16px;margin:0 0 12px}.tile{border:0;border-radius:18px;min-height:145px;background:white;color:#08142f;box-shadow:0 12px 32px #2f4d7a18;font-weight:900;font-size:18px;cursor:pointer;padding:20px 12px}.tile span{display:grid;place-items:center;width:64px;height:64px;border-radius:50%;margin:0 auto 14px;color:white;font-size:22px}.green{background:#2f9e57}.blue{background:#2374e1}.yellow{background:#f2b51e}.red{background:#e95050}.purple{background:#8a55de}.cyan{background:#10bcd7}.status{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.stat{border:1px solid #e1e9f2;border-radius:14px;padding:14px}.stat b{font-size:26px;display:block}.pill{border-radius:999px;padding:5px 9px;font-size:12px;font-weight:850;display:inline-block}.ok{background:#e5f7e9;color:#238044}.bad{background:#ffe6e6;color:#c93131}.warn{background:#fff2d9;color:#b06a00}.low{background:#e8f1ff;color:#1e67c9}.row{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;border-bottom:1px solid #edf2f7;padding:11px 0}.dot{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;color:white;font-weight:900}.cmd{border:1px solid #d7e1ee;background:white;color:#14213d;border-radius:999px;padding:11px 16px;font-weight:850;cursor:pointer;margin:4px;text-decoration:none;display:inline-block}.cmd.primary{background:#2374e1;color:white;border-color:#2374e1}.cmd.danger{background:#e94d4d;color:white;border-color:#e94d4d}.cmd:disabled{opacity:.45;cursor:not-allowed}.field{width:100%;border:1px solid #d7e1ee;border-radius:12px;padding:12px;margin:6px 0;font:inherit}.map{height:280px;border-radius:14px;background:#eef5ff;border:1px solid #dce7f4;position:relative;overflow:hidden}.map.empty,.empty{display:grid;place-items:center;color:#667895;text-align:center;min-height:110px;border:1px dashed #cbd8e8;border-radius:14px;background:#f9fbfe;padding:18px}.room{position:absolute;border:2px solid #cbd9ea;border-radius:9px;padding:13px;color:#52627a;background:#ffffffbb}.pin{position:absolute;width:34px;height:34px;border:0;border-radius:50%;display:grid;place-items:center;color:white;font-weight:900;cursor:pointer}.camera{display:none;margin-top:12px}.camera img{width:100%;max-height:360px;object-fit:contain;background:#071426;border-radius:12px}.table{width:100%;border-collapse:collapse}.table td,.table th{text-align:left;padding:12px;border-bottom:1px solid #edf2f7;vertical-align:top}.small{font-size:12px}.toast{position:fixed;right:18px;bottom:18px;background:#071b34;color:white;padding:12px 16px;border-radius:12px;box-shadow:0 12px 28px #0003;display:none}.logoPreview{width:132px;height:132px;border-radius:24px;border:2px solid #10c6e7;background:#06172e;object-fit:cover;display:block;margin:8px 0}@media(max-width:1000px){.app{grid-template-columns:1fr}.side{display:none}.top{height:auto;padding:16px;align-items:flex-start;flex-direction:column}.grid5,.grid3,.status,.two{grid-template-columns:1fr}.content{padding:12px}}
 </style></head><body><div class="app">
-<aside class="side"><div class="brand"><div class="logo">ZOX</div><div><b>ZOX Robotics</b><br><span class="tag">SMART ROBOTS. BETTER CARE.</span></div></div><nav class="nav">
+<aside class="side"><div class="brand"><div class="logo" id="sideLogo">${brandLogoDataUrl ? `<img src="${brandLogoDataUrl}" alt="ZOX Robotics">` : "ZOX"}</div><div><b>ZOX Robotics</b><br><span class="tag">SMART ROBOTS. BETTER CARE.</span></div></div><nav class="nav">
 <a class="active" onclick="switchView('command',this)">Command</a><a onclick="switchView('robots',this)">Robot Feeds</a><a onclick="switchView('rounds',this)">Rounds</a><a onclick="switchView('residents',this)">Residents</a><a onclick="switchView('alerts',this)">Alerts</a><a onclick="switchView('map',this)">Map</a><a onclick="switchView('logs',this)">Logs</a><a onclick="switchView('settings',this)">Settings</a>
 </nav><div class="sidebox"><b>Nova Online</b><span id="sideOnline" style="float:right">0/1</span><p class="muted" id="sideHealth">Waiting for real robot feed</p><button class="cmd primary" onclick="cmd('camera_start')">Open Camera</button></div></aside>
-<main><header class="top"><div><h1 id="pageTitle">Clinic Command Center</h1><div class="muted" id="pageSubtitle">Every number here is live from Nova or your registered facility data.</div></div><div><span class="pill" id="onlinePill">Offline</span> <span class="pill bad" id="alertCount">0 alerts</span></div></header>
+<main><header class="top"><div><h1 id="pageTitle">Clinic Command Center</h1><div class="muted" id="pageSubtitle">Every number here is live from Nova or your registered facility data.</div></div><div class="topRight"><span class="pill low">${cleanText(user?.username || ADMIN_USER)} · ${cleanText(user?.role || "admin")}</span><span class="pill" id="onlinePill">Offline</span> <span class="pill bad" id="alertCount">0 alerts</span><a class="cmd" href="/logout">Logout</a></div></header>
 <section class="content view active" id="view-command">
 <div class="grid5"><button class="tile" onclick="cmd('start_rounds')"><span class="green">R</span>Start Rounds</button><button class="tile" onclick="checkInSelected()"><span class="blue">C</span>Check-In</button><button class="tile" onclick="medSelected()"><span class="yellow">M</span>Medication</button><button class="tile" onclick="staffAlert()"><span class="red">!</span>Staff Alert</button><button class="tile" onclick="guideSelected()"><span class="purple">G</span>Guide</button></div>
 <div class="card" style="margin-top:14px"><div class="status"><div class="stat"><span class="muted">Robot</span><b id="statRobot">0</b></div><div class="stat"><span class="muted">Residents</span><b id="statResidents">0</b></div><div class="stat"><span class="muted">Map Points</span><b id="statPoints">0</b></div><div class="stat"><span class="muted">People Seen</span><b id="statPeople">0</b></div><div class="stat"><span class="muted">Camera</span><b id="statCamera">Off</b></div></div></div>
@@ -189,10 +270,11 @@ function page() {
 <section class="content view" id="view-alerts"><div class="two"><div class="card"><h2>Alert Center</h2><div id="alertCenter"></div></div><div class="card"><h2>Create Alert</h2><input class="field" id="alertRoom" placeholder="Room or location"><textarea class="field" id="alertMessage" rows="4" placeholder="What happened?"></textarea><button class="cmd danger" onclick="createAlert()">Send Urgent Alert</button></div></div></section>
 <section class="content view" id="view-map"><div class="two"><div class="card"><h2>Nova Map Points</h2><div class="map" id="fullMapBox"></div></div><div class="card"><h2>Destination Control</h2><select class="field" id="pointSelect"></select><button class="cmd primary" onclick="guideSelected()">Guide Visitor</button><textarea class="field" id="messageText" rows="4" placeholder="Message Nova should deliver"></textarea><button class="cmd" onclick="sendMessage()">Send Message To Point</button></div></div></section>
 <section class="content view" id="view-logs"><div class="card"><h2>Operations Log</h2><table class="table"><thead><tr><th>Time</th><th>Event</th><th>Detail</th><th>Status</th></tr></thead><tbody id="opsLog"></tbody></table></div></section>
-<section class="content view" id="view-settings"><div class="two"><div class="card"><h2>Cloud Relay</h2><div id="settingsRelay"></div><button class="cmd primary" onclick="cmd('camera_start')">Test Camera Command</button><button class="cmd" onclick="cmd('security_start')">Test Detection Command</button></div><div class="card"><h2>Excel Format</h2><table class="table small"><tbody id="formatRows"></tbody></table><a class="cmd" href="/templates/residents.csv">Download Template</a></div></div></section>
+<section class="content view" id="view-settings"><div class="two"><div class="card"><h2>Cloud Relay</h2><div id="settingsRelay"></div><button class="cmd primary" onclick="cmd('camera_start')">Test Camera Command</button><button class="cmd" onclick="cmd('security_start')">Test Detection Command</button><h2>Brand Logo</h2><img class="logoPreview" id="logoPreview" src="${brandLogoDataUrl || ""}" alt="ZOX Robotics logo"><input class="field" id="logoFile" type="file" accept="image/png,image/jpeg,image/webp"><button class="cmd primary" onclick="uploadLogo()">Use Uploaded Logo</button><p class="muted">Upload the exact ZOX logo image here. It will replace the cloud logo immediately.</p></div><div class="card"><h2>User Access</h2><input class="field" id="newUser" placeholder="Username"><input class="field" id="newPass" type="password" placeholder="Temporary password"><select class="field" id="newRole"><option value="operator">operator</option><option value="viewer">viewer</option><option value="admin">admin</option></select><button class="cmd primary" onclick="addUser()">Add User</button><div id="userList"></div><h2>Excel Format</h2><table class="table small"><tbody id="formatRows"></tbody></table><a class="cmd" href="/templates/residents.csv">Download Template</a></div></div></section>
 </main></div><div class="toast" id="toast"></div><script>
 const titles={command:["Clinic Command Center","Every number here is live from Nova or your registered facility data."],robots:["Robot Feeds","Telemetry, camera, people detection, SDK and map feed from Nova."],rounds:["Rounds","Launch care rounds and check registered residents."],residents:["Residents","Register by form or Excel CSV upload, then command Nova by resident."],alerts:["Alerts","Create urgent staff alerts and monitor real robot/facility events."],map:["Map","Uses only real map points reported by Nova."],logs:["Logs","Cloud commands, robot state pushes, robot results and facility actions."],settings:["Settings","Relay health, safety controls and resident import format."]};
 const columns=${JSON.stringify(residentColumns)};
+const currentUser=${JSON.stringify({ username: user?.username || ADMIN_USER, role: user?.role || "admin" })};
 async function get(p){const r=await fetch(p,{cache:"no-store"});return r.json()}
 async function post(p,body){const r=await fetch(p,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});return r.json()}
 async function cmd(action,params={}){const out=await post("/api/command",{action,params});notice(out.ok?"Command queued":"Command failed");refresh()}
@@ -215,6 +297,9 @@ function sendMessage(){const p=selectedPoint(); if(!p)return notice("Nova has no
 async function addResident(){const resident={full_name:manualName.value,room:manualRoom.value,wing:manualWing.value,care_level:manualCare.value,primary_contact_phone:manualPhone.value,medication_notes:manualNotes.value};const out=await post("/api/residents",resident);notice(out.ok?"Resident registered":out.error||"Could not add resident");refresh()}
 async function createAlert(){const out=await post("/api/alerts",{priority:"urgent",room:alertRoom.value,message:alertMessage.value||"Staff assistance requested."});notice(out.ok?"Alert created":out.error||"Could not create alert");refresh()}
 async function uploadResidents(){const file=residentFile.files[0];if(!file)return notice("Choose the completed CSV first.");const text=await file.text();const r=await fetch("/api/residents/import",{method:"POST",headers:{"content-type":"text/csv"},body:text});const out=await r.json();notice(out.ok?("Imported "+out.count+" residents"):(out.error||"Import failed"));residentFile.value="";refresh()}
+async function uploadLogo(){const file=logoFile.files[0];if(!file)return notice("Choose the exact ZOX logo image first.");const reader=new FileReader();reader.onload=async()=>{const out=await post("/api/logo",{dataUrl:reader.result});notice(out.ok?"Logo updated":"Logo update failed");if(out.logo){logoPreview.src=out.logo;sideLogo.innerHTML='<img src="'+out.logo+'" alt="ZOX Robotics">'}logoFile.value=""};reader.readAsDataURL(file)}
+async function addUser(){const out=await post("/api/users",{username:newUser.value,password:newPass.value,role:newRole.value});notice(out.ok?"User added":out.error||"Could not add user");newUser.value="";newPass.value="";loadUsers()}
+async function loadUsers(){const out=await get("/api/users");userList.innerHTML=out.users?out.users.map(u=>row(u.role==="admin"?"blue":"green",u.username,u.role+" · created "+new Date(u.createdAt).toLocaleDateString())).join(""):empty(out.error||"User list unavailable")}
 function renderMap(target,points){if(!points.length){target.className="map empty";target.innerHTML="No real Nova map points received yet.";return}target.className="map";target.innerHTML=points.slice(0,10).map((p,i)=>'<button class="pin '+(i%2?"green":"blue")+'" title="'+esc(p.name)+'" style="left:'+(8+(i*17)%78)+'%;top:'+(16+(i*23)%62)+'%" onclick="cmd(\\'visitor_guide\\',{destination:\\''+esc(p.name)+'\\'})">'+(i+1)+'</button>').join("")}
 function renderAll(s){const care=s.care||{};const residents=care.residents||[];const reminders=care.reminders||[];const alerts=care.alerts||[];const pts=s.points||[];const people=s.people||[];window.state=s;statRobot.textContent=s.online?"1":"0";statResidents.textContent=residents.length;statPoints.textContent=pts.length;statPeople.textContent=people.length;statCamera.textContent=s.camera?"On":"Off";sideOnline.textContent=(s.online?"1":"0")+"/1";sideHealth.textContent=s.online?"Robot connected: "+new Date(s.lastSeen).toLocaleTimeString():"Waiting for real robot feed";onlinePill.textContent=s.online?"Online":"Offline";onlinePill.className="pill "+(s.online?"ok":"bad");alertCount.textContent=alerts.length+" alerts";
 robotBox.innerHTML=row(s.online?"blue":"red","Nova 01",(s.status?.destination||"No destination")+" - "+(s.status?.battery||"Battery unknown"),'<span class="pill '+(s.online?"ok":"bad")+'">'+(s.online?"Online":"Offline")+"</span>")+'<p class="muted">'+esc(s.status?.status||"No status from Nova yet.")+"</p>";
@@ -232,13 +317,43 @@ formatRows.innerHTML=columns.map(c=>"<tr><td><b>"+c+"</b></td><td>"+({resident_i
 if(s.camera){cameraBox.style.display="block";noCamera.style.display="none";camera.src="/api/camera.jpg?t="+Date.now();cameraNote.textContent="Real Nova snapshot feed."}else{cameraBox.style.display="none";noCamera.style.display="grid"}
 }
 async function refresh(){renderAll(await get("/api/state"))}
-setInterval(refresh,2000);refresh();
+setInterval(refresh,2000);refresh();loadUsers();
 </script></body></html>`;
 }
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   if (url.pathname === "/health") return sendJson(res, 200, { ok: true });
+
+  if (url.pathname === "/login" && req.method === "GET") {
+    if (currentUser(req) || isAdmin(req)) {
+      res.writeHead(302, { location: "/", "cache-control": "no-store" });
+      return res.end();
+    }
+    return sendText(res, 200, loginPage(), "text/html; charset=utf-8");
+  }
+  if (url.pathname === "/login" && req.method === "POST") {
+    const form = parseForm(await readBody(req));
+    const user = users.get(cleanText(form.username));
+    if (!user || !verifyPassword(form.password, user.passwordHash)) {
+      log("login_failed", { username: cleanText(form.username) });
+      return sendText(res, 401, loginPage("Invalid username or password."), "text/html; charset=utf-8");
+    }
+    createSession(res, user.username);
+    log("login", { username: user.username });
+    res.writeHead(302, { location: "/", "cache-control": "no-store" });
+    return res.end();
+  }
+  if (url.pathname === "/logout") {
+    const sid = parseCookies(req).nova_session;
+    if (sid) sessions.delete(sid);
+    res.writeHead(302, {
+      location: "/login",
+      "set-cookie": "nova_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
+      "cache-control": "no-store",
+    });
+    return res.end();
+  }
 
   if (url.pathname.startsWith("/robot/")) {
     if (!isRobot(req)) return sendJson(res, 403, { ok: false, error: "bad robot token" });
@@ -264,7 +379,42 @@ const server = http.createServer(async (req, res) => {
 
   if (!requireAdmin(req, res)) return;
 
-  if (url.pathname === "/") return sendText(res, 200, page(), "text/html; charset=utf-8");
+  if (url.pathname === "/") return sendText(res, 200, page(currentUser(req) || users.get(ADMIN_USER)), "text/html; charset=utf-8");
+  if (url.pathname === "/api/me") {
+    const user = currentUser(req) || users.get(ADMIN_USER);
+    return sendJson(res, 200, { ok: true, user: { username: user.username, role: user.role } });
+  }
+  if (url.pathname === "/api/users" && req.method === "GET") {
+    if (!requireRole(req, res, "admin")) return;
+    return sendJson(res, 200, {
+      ok: true,
+      users: Array.from(users.values()).map((u) => ({ username: u.username, role: u.role, createdAt: u.createdAt })),
+    });
+  }
+  if (url.pathname === "/api/users" && req.method === "POST") {
+    const actor = requireRole(req, res, "admin");
+    if (!actor) return;
+    const body = JSON.parse((await readBody(req)) || "{}");
+    const username = cleanText(body.username).toLowerCase();
+    const password = String(body.password || "");
+    const role = ["admin", "operator", "viewer"].includes(cleanText(body.role)) ? cleanText(body.role) : "operator";
+    if (!/^[a-z0-9._-]{3,40}$/.test(username)) return sendJson(res, 400, { ok: false, error: "username must be 3-40 letters, numbers, dot, dash, or underscore" });
+    if (password.length < 8) return sendJson(res, 400, { ok: false, error: "password must be at least 8 characters" });
+    users.set(username, { username, role, passwordHash: passwordHash(password), createdAt: Date.now() });
+    log("user_created", { username, role, actor: actor.username });
+    return sendJson(res, 200, { ok: true, user: { username, role } });
+  }
+  if (url.pathname === "/api/logo" && req.method === "POST") {
+    const actor = requireRole(req, res, "admin");
+    if (!actor) return;
+    const body = JSON.parse((await readBody(req)) || "{}");
+    const dataUrl = String(body.dataUrl || "");
+    if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return sendJson(res, 400, { ok: false, error: "upload a PNG, JPEG, or WEBP image" });
+    if (Buffer.byteLength(dataUrl) > 1_600_000) return sendJson(res, 413, { ok: false, error: "logo image is too large" });
+    brandLogoDataUrl = dataUrl;
+    log("logo_updated", { actor: actor.username });
+    return sendJson(res, 200, { ok: true, logo: brandLogoDataUrl });
+  }
   if (url.pathname === "/templates/residents.csv") {
     const example = [
       residentColumns.join(","),
@@ -288,6 +438,7 @@ const server = http.createServer(async (req, res) => {
     return res.end(data);
   }
   if (url.pathname === "/api/residents" && req.method === "POST") {
+    if (!requireRole(req, res, "operator")) return;
     const resident = toResident(JSON.parse((await readBody(req)) || "{}"));
     if (!resident) return sendJson(res, 400, { ok: false, error: "full_name and room are required" });
     const idx = facility.residents.findIndex((r) => r.id === resident.id);
@@ -298,6 +449,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true, resident });
   }
   if (url.pathname === "/api/residents/import" && req.method === "POST") {
+    if (!requireRole(req, res, "operator")) return;
     const rows = parseCsv(await readBody(req));
     if (rows.length < 2) return sendJson(res, 400, { ok: false, error: "CSV must include a header row and at least one resident" });
     const header = rows[0].map((v) => cleanText(v).toLowerCase());
@@ -318,6 +470,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true, count: imported.length, residents: facility.residents });
   }
   if (url.pathname === "/api/alerts" && req.method === "POST") {
+    if (!requireRole(req, res, "operator")) return;
     const body = JSON.parse((await readBody(req)) || "{}");
     const alert = { id: crypto.randomUUID(), createdAt: Date.now(), priority: cleanText(body.priority) || "urgent", room: cleanText(body.room), message: cleanText(body.message) || "Staff assistance requested." };
     facility.alerts.unshift(alert);
@@ -327,6 +480,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true, alert });
   }
   if (url.pathname === "/api/command" && req.method === "POST") {
+    if (!requireRole(req, res, "operator")) return;
     const body = JSON.parse((await readBody(req)) || "{}");
     const command = { id: crypto.randomUUID(), at: Date.now(), action: cleanText(body.action), params: body.params || {} };
     if (!command.action) return sendJson(res, 400, { ok: false, error: "action is required" });
