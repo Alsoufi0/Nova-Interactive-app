@@ -157,6 +157,12 @@ function loginPage(error = "") {
 <input class="field" name="username" placeholder="Username" autocomplete="username" autofocus><input class="field" name="password" placeholder="Password" type="password" autocomplete="current-password"><button class="btn">Sign In</button></form></body></html>`;
 }
 
+function logoutPage() {
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signed Out</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#0d5790,#05152b 55%,#020814);font-family:Inter,system-ui,Segoe UI,sans-serif;color:white}.card{width:min(430px,92vw);background:#ffffff10;border:1px solid #ffffff26;border-radius:24px;padding:28px;text-align:center;box-shadow:0 24px 70px #0008}.logo{width:96px;height:96px;border-radius:26px;margin:0 auto 16px;background:#06172e;border:2px solid #10c6e7;display:grid;place-items:center;overflow:hidden}.logo img{width:100%;height:100%;object-fit:cover}.logo span{color:#1bd6ee;font-size:30px;font-weight:950}.btn{display:inline-block;border:0;border-radius:14px;background:#12bee5;color:#03162d;padding:14px 22px;font-weight:950;margin-top:12px;text-decoration:none}.muted{color:#bed0e3;font-size:13px}</style></head><body><section class="card">
+<div class="logo">${brandLogoDataUrl ? `<img src="${brandLogoDataUrl}" alt="ZOX Robotics">` : "<span>ZOX</span>"}</div><h1>Signed Out</h1><p class="muted">Your Care Cloud session has ended on this device.</p><a class="btn" href="/login">Sign In Again</a></section></body></html>`;
+}
+
 function parseForm(body) {
   return Object.fromEntries(
     String(body || "").split("&").filter(Boolean).map((part) => {
@@ -297,7 +303,7 @@ function sendMessage(){const p=selectedPoint(); if(!p)return notice("Nova has no
 async function addResident(){const resident={full_name:manualName.value,room:manualRoom.value,wing:manualWing.value,care_level:manualCare.value,primary_contact_phone:manualPhone.value,medication_notes:manualNotes.value};const out=await post("/api/residents",resident);notice(out.ok?"Resident registered":out.error||"Could not add resident");refresh()}
 async function createAlert(){const out=await post("/api/alerts",{priority:"urgent",room:alertRoom.value,message:alertMessage.value||"Staff assistance requested."});notice(out.ok?"Alert created":out.error||"Could not create alert");refresh()}
 async function uploadResidents(){const file=residentFile.files[0];if(!file)return notice("Choose the completed CSV first.");const text=await file.text();const r=await fetch("/api/residents/import",{method:"POST",headers:{"content-type":"text/csv"},body:text});const out=await r.json();notice(out.ok?("Imported "+out.count+" residents"):(out.error||"Import failed"));residentFile.value="";refresh()}
-async function uploadLogo(){const file=logoFile.files[0];if(!file)return notice("Choose the exact ZOX logo image first.");const reader=new FileReader();reader.onload=async()=>{const out=await post("/api/logo",{dataUrl:reader.result});notice(out.ok?"Logo updated":"Logo update failed");if(out.logo){logoPreview.src=out.logo;sideLogo.innerHTML='<img src="'+out.logo+'" alt="ZOX Robotics">'}logoFile.value=""};reader.readAsDataURL(file)}
+async function uploadLogo(){const file=logoFile.files[0];if(!file)return notice("Choose the exact ZOX logo image first.");if(file.size>5*1024*1024)return notice("Logo is too large. Use a PNG/JPEG under 5 MB.");const reader=new FileReader();reader.onload=async()=>{const out=await post("/api/logo",{dataUrl:reader.result});notice(out.ok?"Logo updated":(out.error||"Logo update failed"));if(out.logo){logoPreview.src=out.logo;sideLogo.innerHTML='<img src="'+out.logo+'" alt="ZOX Robotics">'}logoFile.value=""};reader.onerror=()=>notice("Could not read that image file.");reader.readAsDataURL(file)}
 async function addUser(){const out=await post("/api/users",{username:newUser.value,password:newPass.value,role:newRole.value});notice(out.ok?"User added":out.error||"Could not add user");newUser.value="";newPass.value="";loadUsers()}
 async function loadUsers(){const out=await get("/api/users");userList.innerHTML=out.users?out.users.map(u=>row(u.role==="admin"?"blue":"green",u.username,u.role+" · created "+new Date(u.createdAt).toLocaleDateString())).join(""):empty(out.error||"User list unavailable")}
 function renderMap(target,points){if(!points.length){target.className="map empty";target.innerHTML="No real Nova map points received yet.";return}target.className="map";target.innerHTML=points.slice(0,10).map((p,i)=>'<button class="pin '+(i%2?"green":"blue")+'" title="'+esc(p.name)+'" style="left:'+(8+(i*17)%78)+'%;top:'+(16+(i*23)%62)+'%" onclick="cmd(\\'visitor_guide\\',{destination:\\''+esc(p.name)+'\\'})">'+(i+1)+'</button>').join("")}
@@ -347,12 +353,12 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/logout") {
     const sid = parseCookies(req).nova_session;
     if (sid) sessions.delete(sid);
-    res.writeHead(302, {
-      location: "/login",
+    res.writeHead(200, {
       "set-cookie": "nova_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
+      "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
     });
-    return res.end();
+    return res.end(logoutPage());
   }
 
   if (url.pathname.startsWith("/robot/")) {
@@ -409,8 +415,8 @@ const server = http.createServer(async (req, res) => {
     if (!actor) return;
     const body = JSON.parse((await readBody(req)) || "{}");
     const dataUrl = String(body.dataUrl || "");
-    if (!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return sendJson(res, 400, { ok: false, error: "upload a PNG, JPEG, or WEBP image" });
-    if (Buffer.byteLength(dataUrl) > 1_600_000) return sendJson(res, 413, { ok: false, error: "logo image is too large" });
+    if (!/^data:image\/(png|jpg|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return sendJson(res, 400, { ok: false, error: "Upload a PNG, JPG, JPEG, or WEBP image." });
+    if (Buffer.byteLength(dataUrl) > 7_000_000) return sendJson(res, 413, { ok: false, error: "Logo is too large. Use an image under 5 MB." });
     brandLogoDataUrl = dataUrl;
     log("logo_updated", { actor: actor.username });
     return sendJson(res, 200, { ok: true, logo: brandLogoDataUrl });
