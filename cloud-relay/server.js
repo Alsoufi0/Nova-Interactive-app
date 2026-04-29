@@ -13,6 +13,7 @@ let robot = {
   detection: {},
   people: [],
   points: [],
+  care: { residents: [], reminders: [], alerts: [], logs: [] },
   cameraJpegBase64: "",
 };
 const commandQueue = [];
@@ -73,31 +74,50 @@ function requireAdmin(req, res) {
 function page() {
   return `<!doctype html>
 <html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Nova Cloud</title>
+<title>Nova Care Cloud</title>
 <style>
-body{margin:0;background:#071012;color:#eef8f7;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
-main{max-width:900px;margin:auto;padding:16px}.top{position:sticky;top:0;background:#071012ee;padding:12px 0;backdrop-filter:blur(12px)}
-h1{margin:0;font-size:30px}.sub{color:#9db3b6;margin:4px 0 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.card{background:#111d21;border:1px solid #284147;border-radius:14px;padding:14px;margin-top:12px;box-shadow:0 10px 28px #0007}
-button,input{width:100%;box-sizing:border-box;border:0;border-radius:12px;padding:13px;margin:5px 0;font-size:16px}
-button{background:#2ee0bd;color:#04110f;font-weight:850}.stop{background:#e45757;color:white}.ghost{background:#223238;color:#eef8f7}
-input{background:#eaf4f3;color:#102024}.small{white-space:pre-wrap;color:#a8bbbd;font-size:13px;max-height:220px;overflow:auto}
-img{display:block;width:100%;max-height:430px;object-fit:contain;background:#020506;border-radius:12px;border:1px solid #284147}
-@media(max-width:700px){.grid{grid-template-columns:1fr}main{padding:12px}}
+body{margin:0;background:#f4f7f7;color:#102024;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:1120px;margin:auto;padding:16px}.top{position:sticky;top:0;background:#f4f7f7ee;padding:12px 0;backdrop-filter:blur(12px);z-index:2}
+h1{margin:0;font-size:30px}.sub{color:#617579;margin:4px 0 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.tri{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.card{background:white;border:1px solid #d8e3e4;border-radius:14px;padding:14px;margin-top:12px;box-shadow:0 10px 28px #1232}
+.dark{background:#0d191d;color:#eef8f7;border-color:#29444a}.pill{display:inline-block;border-radius:999px;background:#e9f3f2;padding:7px 10px;margin:4px;color:#163034;font-size:13px}
+button,input,select,textarea{width:100%;box-sizing:border-box;border:0;border-radius:12px;padding:13px;margin:5px 0;font-size:16px}
+button{background:#1e8f7d;color:white;font-weight:850}.stop{background:#d85151;color:white}.ghost{background:#e8eff0;color:#102024}.nav{background:#183139;color:white}.warn{background:#b76b2b;color:white}
+input,select,textarea{background:#edf4f4;color:#102024;border:1px solid #d8e3e4}.small{white-space:pre-wrap;color:#617579;font-size:13px;max-height:220px;overflow:auto}
+img{display:block;width:100%;max-height:430px;object-fit:contain;background:#020506;border-radius:12px;border:1px solid #284147}.row{display:flex;gap:8px;align-items:center}.row>*{flex:1}
+@media(max-width:760px){.grid,.tri{grid-template-columns:1fr}main{padding:12px}.row{display:block}}
 </style></head><body><main>
-<div class="top"><h1>Nova Cloud</h1><p class="sub">Internet control relay for Nova concierge.</p></div>
-<div class="grid">
-<div class="card"><b>Movement</b><button onclick="cmd('follow')">Follow</button><button onclick="cmd('door_follow')">Door Follow</button><button class="stop" onclick="cmd('stop')">Stop</button></div>
-<div class="card"><b>Navigation</b><input id="dest" placeholder="Destination"><button onclick="cmd('guide',{destination:dest.value})">Guide</button><button class="ghost" onclick="cmd('charge')">Charge</button></div>
-<div class="card"><b>Message</b><input id="msgDest" placeholder="Destination"><input id="msg" placeholder="Message"><button onclick="cmd('message',{destination:msgDest.value,message:msg.value})">Send Message</button></div>
-<div class="card"><b>Camera / Detection</b><button onclick="cmd('camera_start')">Open Camera</button><button onclick="cmd('security_start')">Start Detection</button><button class="ghost" onclick="cmd('camera_stop')">Close Camera</button><button class="ghost" onclick="cmd('security_stop')">Stop Detection</button></div>
+<div class="top"><h1>Nova Care Cloud</h1><p class="sub">Secure internet control for elder care, messages, wayfinding, detection, and care logs.</p></div>
+<div class="tri">
+<div class="card dark"><b>Robot</b><p id="robotSummary" class="sub"></p><button class="stop" onclick="cmd('stop')">Stop Now</button></div>
+<div class="card"><b>Care Ops</b><button onclick="cmd('start_rounds')">Start Check-In Round</button><button class="warn" onclick="staffAlert()">Staff Alert</button></div>
+<div class="card"><b>Safety</b><button onclick="cmd('security_start')">Start Detection</button><button class="ghost" onclick="cmd('security_stop')">Stop Detection</button></div>
 </div>
-<div class="card"><b>Live Camera</b><img id="camera" alt="camera"><p id="cameraNote" class="sub"></p></div>
+<div class="grid">
+<div class="card"><b>Family Message</b><input id="msgDest" placeholder="Destination or room"><textarea id="msg" rows="3" placeholder="Message to deliver"></textarea><button onclick="cmd('message',{destination:msgDest.value,message:msg.value})">Send Message</button></div>
+<div class="card"><b>Visitor Guide</b><select id="dest"></select><button class="nav" onclick="cmd('visitor_guide',{destination:dest.value})">Guide Visitor</button><button class="ghost" onclick="cmd('charge')">Send To Charger</button></div>
+</div>
+<div class="grid">
+<div class="card"><b>Residents</b><div id="residents"></div></div>
+<div class="card"><b>Reminders</b><div id="reminders"></div></div>
+</div>
+<div class="card"><b>Live Camera</b><div class="row"><button onclick="cmd('camera_start')">Open Camera</button><button class="ghost" onclick="cmd('camera_stop')">Close Camera</button></div><img id="camera" alt="camera"><p id="cameraNote" class="sub"></p></div>
+<div class="grid"><div class="card"><b>Alerts</b><div id="alerts" class="small"></div></div><div class="card"><b>Care Log</b><div id="logs" class="small"></div></div></div>
 <div class="grid"><div class="card"><b>Status</b><pre id="status" class="small"></pre></div><div class="card"><b>People / Points</b><pre id="details" class="small"></pre></div></div>
 </main><script>
 async function get(p){return (await fetch(p,{cache:'no-store'})).json()}
 async function cmd(action,params={}){await fetch('/api/command',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action,params})});refresh()}
-async function refresh(){const s=await get('/api/state');status.textContent=JSON.stringify({online:s.online,lastSeen:s.lastSeen,status:s.status,detection:s.detection},null,2);details.textContent=JSON.stringify({people:s.people,points:s.points},null,2);cameraNote.textContent=s.camera?'Camera snapshot online':'No camera snapshot yet';if(s.camera) camera.src='/api/camera.jpg?t='+Date.now()}
+function esc(v){return String(v||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function staffAlert(){cmd('staff_alert',{priority:'urgent',room:dest.value||msgDest.value,message:msg.value||'Resident or visitor requested assistance.'})}
+function fillSelect(points){const old=dest.value;dest.innerHTML=(points||[]).map(p=>'<option>'+esc(p.name)+'</option>').join('');if(old)dest.value=old}
+function renderCare(care){
+  const rs=care.residents||[], rem=care.reminders||[], al=care.alerts||[], lg=care.logs||[];
+  residents.innerHTML=rs.map(r=>'<div class="pill"><b>'+esc(r.name)+'</b><br>'+esc(r.room)+'<br><button onclick="cmd(\'resident_checkin\',{residentId:\''+esc(r.id)+'\'})">Check In</button><button class="ghost" onclick="cmd(\'med_reminder\',{residentId:\''+esc(r.id)+'\'})">Reminder</button></div>').join('')||'<p class="sub">No residents from Nova yet.</p>';
+  reminders.innerHTML=rem.map(r=>'<div class="pill"><b>'+esc(r.timeLabel)+'</b> '+esc(r.title)+'<br><button onclick="cmd(\'med_reminder\',{reminderId:\''+esc(r.id)+'\'})">Deliver</button></div>').join('')||'<p class="sub">No reminders.</p>';
+  alerts.innerHTML=al.map(a=>new Date(a.createdAt).toLocaleTimeString()+'  '+esc(a.priority)+'  '+esc(a.room)+'  '+esc(a.message)).join('\n')||'No open alerts.';
+  logs.innerHTML=lg.map(l=>new Date(l.createdAt).toLocaleTimeString()+'  '+esc(l.title)+' - '+esc(l.detail)).join('\n')||'No care log yet.';
+}
+async function refresh(){const s=await get('/api/state');robotSummary.textContent=(s.online?'Online':'Offline')+' - '+(s.status?.battery||'battery --')+' - '+(s.status?.status||'waiting');status.textContent=JSON.stringify({online:s.online,lastSeen:s.lastSeen,status:s.status,detection:s.detection},null,2);details.textContent=JSON.stringify({people:s.people,points:s.points},null,2);fillSelect(s.points||[]);renderCare(s.care||{});cameraNote.textContent=s.camera?'Camera snapshot online':'No camera snapshot yet';if(s.camera) camera.src='/api/camera.jpg?t='+Date.now()}
 setInterval(refresh,2000);refresh()
 </script></body></html>`;
 }
@@ -116,6 +136,7 @@ const server = http.createServer(async (req, res) => {
       robot.detection = body.detection || robot.detection;
       robot.people = body.people || robot.people;
       robot.points = body.points || robot.points;
+      robot.care = body.care || robot.care;
       if (body.cameraJpegBase64) robot.cameraJpegBase64 = body.cameraJpegBase64;
       events.push({ at: Date.now(), type: "state" });
       while (events.length > 100) events.shift();
