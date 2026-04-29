@@ -72,6 +72,12 @@ function loadAuthStore() {
       }
     }
     if (!process.env.BRAND_LOGO_DATA_URL && store.brandLogoDataUrl) brandLogoDataUrl = store.brandLogoDataUrl;
+    if (store.facility && typeof store.facility === "object") {
+      facility.residents = Array.isArray(store.facility.residents) ? store.facility.residents : [];
+      facility.reminders = Array.isArray(store.facility.reminders) ? store.facility.reminders : [];
+      facility.alerts = Array.isArray(store.facility.alerts) ? store.facility.alerts : [];
+      facility.logs = Array.isArray(store.facility.logs) ? store.facility.logs : [];
+    }
   } catch (error) {
     console.error("Could not load auth store", error.message);
   }
@@ -89,6 +95,7 @@ function saveAuthStore() {
       })),
       sessions: Array.from(sessions.entries()).filter(([, session]) => session.expiresAt >= Date.now()),
       brandLogoDataUrl,
+      facility,
       savedAt: Date.now(),
     };
     fs.writeFileSync(AUTH_STORE_FILE, JSON.stringify(store, null, 2));
@@ -598,6 +605,7 @@ const server = http.createServer(async (req, res) => {
     if (idx >= 0) facility.residents[idx] = resident;
     else facility.residents.push(resident);
     facilityLog("Resident registered", `${resident.name} - ${resident.room}`);
+    saveAuthStore();
     log("resident", { id: resident.id, name: resident.name });
     return sendJson(res, 200, { ok: true, resident });
   }
@@ -619,6 +627,7 @@ const server = http.createServer(async (req, res) => {
       else facility.residents.push(resident);
     });
     facilityLog("Resident import", `${imported.length} residents imported`);
+    saveAuthStore();
     log("resident_import", { count: imported.length });
     return sendJson(res, 200, { ok: true, count: imported.length, residents: facility.residents });
   }
@@ -629,6 +638,7 @@ const server = http.createServer(async (req, res) => {
     facility.alerts.unshift(alert);
     facilityLog("Alert created", `${alert.room || "Facility"} - ${alert.message}`, "ALERT");
     commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "staff_alert", params: alert });
+    saveAuthStore();
     log("alert", alert);
     return sendJson(res, 200, { ok: true, alert });
   }
@@ -648,8 +658,10 @@ const server = http.createServer(async (req, res) => {
       };
       facility.alerts.unshift(alert);
       facilityLog("Staff alert queued", `${alert.room || "Facility"} - ${alert.message}`, "ALERT");
+      saveAuthStore();
     } else {
       facilityLog(titleForAction(command.action), JSON.stringify(command.params), "QUEUED");
+      saveAuthStore();
     }
     log("command", command);
     return sendJson(res, 200, { ok: true, command });
