@@ -1,0 +1,6 @@
+-keep class com.ainirobot.** { *; }
+-keep class com.orionstar.** { *; }
+-keep class com.codex.novamessenger.ReflectionRobotAdapter { *; }
+-keep class com.codex.novamessenger.RobotAdapter { *; }
+-dontwarn com.ainirobot.**
+-dontwarn com.orionstar.**
