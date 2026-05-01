@@ -8,9 +8,12 @@ import java.io.OutputStream
 import java.net.ServerSocket
 import java.net.URLDecoder
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 class RemoteControlServer(
     private val port: Int = 8787,
+    private val username: String,
+    private val password: String,
     private val statusProvider: () -> RemoteStatus,
     private val peopleProvider: () -> List<BodyTarget>,
     private val pointsProvider: () -> List<MapPoint>,
@@ -20,6 +23,8 @@ class RemoteControlServer(
 ) {
     private val running = AtomicBoolean(false)
     private var serverSocket: ServerSocket? = null
+    private val lastCameraRequestAt = AtomicLong(0L)
+    private val CAMERA_MIN_INTERVAL_MS = 500L
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -31,6 +36,7 @@ class RemoteControlServer(
                     val socket = serverSocket?.accept() ?: break
                     Thread {
                         socket.use {
+                            it.soTimeout = 15_000
                             val reader = BufferedReader(InputStreamReader(it.getInputStream()))
                             val request = reader.readLine().orEmpty()
                             val headers = mutableMapOf<String, String>()
@@ -72,9 +78,18 @@ class RemoteControlServer(
             "/people" -> HttpResponse("application/json", peopleToJson(peopleProvider()))
             "/points" -> HttpResponse("application/json", pointsToJson(pointsProvider()))
             "/detection" -> HttpResponse("application/json", detectionProvider().toJson())
-            "/camera.jpg" -> cameraFrameProvider()?.let {
-                HttpResponse("image/jpeg", body = "", headers = mapOf("Pragma" to "no-cache"), bodyBytes = it)
-            } ?: HttpResponse("text/plain; charset=utf-8", "Camera feed is not ready.", 503)
+            "/camera.jpg" -> {
+                val now = System.currentTimeMillis()
+                val last = lastCameraRequestAt.get()
+                if (now - last < CAMERA_MIN_INTERVAL_MS) {
+                    HttpResponse("text/plain; charset=utf-8", "Rate limited. Max 2 frames/sec.", 429)
+                } else {
+                    lastCameraRequestAt.set(now)
+                    cameraFrameProvider()?.let {
+                        HttpResponse("image/jpeg", body = "", headers = mapOf("Pragma" to "no-cache"), bodyBytes = it)
+                    } ?: HttpResponse("text/plain; charset=utf-8", "Camera feed is not ready.", 503)
+                }
+            }
             "/control" -> {
                 val result = commandHandler(RemoteCommand(query["action"].orEmpty(), query))
                 HttpResponse("application/json", """{"ok":true,"message":"${esc(result)}"}""")
@@ -88,7 +103,7 @@ class RemoteControlServer(
         val decoded = runCatching {
             String(Base64.decode(header.removePrefix("Basic ").trim(), Base64.DEFAULT), Charsets.UTF_8)
         }.getOrDefault("")
-        return decoded == "$USERNAME:$PASSWORD"
+        return decoded == "$username:$password"
     }
 
     private fun unauthorized(): HttpResponse =
@@ -263,7 +278,5 @@ class RemoteControlServer(
 
     companion object {
         private const val TAG = "NovaRemote"
-        const val USERNAME = "admin"
-        const val PASSWORD = "nova2026"
     }
 }

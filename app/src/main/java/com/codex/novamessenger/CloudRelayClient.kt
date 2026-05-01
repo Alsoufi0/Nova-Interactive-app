@@ -9,6 +9,7 @@ import org.json.JSONObject
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.ConcurrentLinkedQueue
 
 class CloudRelayClient(
     private val cloudUrlProvider: () -> String,
@@ -19,11 +20,22 @@ class CloudRelayClient(
     private val handler = Handler(Looper.getMainLooper())
     private var running = false
 
+    private var consecutiveFailures = 0
+    private var nextRetryAfter = 0L
+
+    private val pendingResults = ConcurrentLinkedQueue<Pair<String, String>>()
+
     private val tick = object : Runnable {
         override fun run() {
             if (!running) return
-            Thread { syncOnce() }.start()
-            handler.postDelayed(this, 2_000)
+            val now = System.currentTimeMillis()
+            val delayMs = if (consecutiveFailures == 0) 2_000L else {
+                minOf(60_000L, 2_000L * (1L shl minOf(consecutiveFailures - 1, 5)))
+            }
+            if (now >= nextRetryAfter) {
+                Thread { syncOnce() }.start()
+            }
+            handler.postDelayed(this, delayMs)
         }
     }
 
@@ -43,6 +55,7 @@ class CloudRelayClient(
         val token = tokenProvider().trim()
         if (base.isBlank() || token.isBlank()) return
         runCatching {
+            flushPendingResults(base, token)
             postJson("$base/robot/state", stateProvider().toJson(), token)
             val response = getJson("$base/robot/poll", token)
             val commands = response.optJSONArray("commands") ?: JSONArray()
@@ -54,11 +67,34 @@ class CloudRelayClient(
                     params = jsonToMap(item.optJSONObject("params") ?: JSONObject())
                 )
                 val result = commandHandler(command)
-                postJson("$base/robot/result", JSONObject().put("id", command.id).put("result", result), token)
+                runCatching {
+                    postJson("$base/robot/result", JSONObject().put("id", command.id).put("result", result), token)
+                }.onFailure {
+                    pendingResults.offer(command.id to result)
+                    Log.w(TAG, "Result for command ${command.id} queued for retry: ${it.message}")
+                }
             }
+            consecutiveFailures = 0
             Log.d(TAG, "Cloud sync ok: commands=${commands.length()}")
         }.onFailure {
-            Log.e(TAG, "Cloud sync failed url=$base token=${token.take(4)}...", it)
+            consecutiveFailures++
+            val backoffMs = minOf(60_000L, 2_000L * (1L shl minOf(consecutiveFailures - 1, 5)))
+            nextRetryAfter = System.currentTimeMillis() + backoffMs
+            Log.e(TAG, "Cloud sync failed (attempt $consecutiveFailures, backoff ${backoffMs}ms): ${it.message}")
+        }
+    }
+
+    private fun flushPendingResults(base: String, token: String) {
+        val iterator = pendingResults.iterator()
+        while (iterator.hasNext()) {
+            val (id, result) = iterator.next()
+            runCatching {
+                postJson("$base/robot/result", JSONObject().put("id", id).put("result", result), token)
+                iterator.remove()
+                Log.d(TAG, "Flushed pending result for command $id")
+            }.onFailure {
+                break
+            }
         }
     }
 

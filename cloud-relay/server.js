@@ -5,8 +5,20 @@ const path = require("path");
 
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_USER = process.env.ADMIN_USER || "admin";
-const ADMIN_PASS = process.env.ADMIN_PASS || "nova2026";
-const ROBOT_TOKEN = process.env.ROBOT_TOKEN || "change-me-robot-token";
+const ADMIN_PASS = (() => {
+  if (process.env.ADMIN_PASS) return process.env.ADMIN_PASS;
+  const generated = crypto.randomBytes(16).toString("hex");
+  console.warn(`[SECURITY] ADMIN_PASS env var not set. Generated one-time password: ${generated}`);
+  console.warn("[SECURITY] Set ADMIN_PASS environment variable to avoid regeneration on each restart.");
+  return generated;
+})();
+const ROBOT_TOKEN = (() => {
+  if (process.env.ROBOT_TOKEN) return process.env.ROBOT_TOKEN;
+  const generated = crypto.randomBytes(16).toString("hex");
+  console.warn(`[SECURITY] ROBOT_TOKEN env var not set. Generated one-time token: ${generated}`);
+  console.warn("[SECURITY] Set ROBOT_TOKEN environment variable and update the Android app to match.");
+  return generated;
+})();
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 const SESSION_DAYS = Math.max(1, Number(process.env.SESSION_DAYS || 180));
 const SESSION_MAX_AGE = Math.floor(SESSION_DAYS * 24 * 60 * 60);
@@ -34,9 +46,38 @@ const commandQueue = [];
 const events = [];
 const sessions = new Map();
 const users = new Map();
+const loginAttempts = new Map();
 const detectionHistory = [];
 let lastDetectionLogAt = 0;
 let brandLogoDataUrl = process.env.BRAND_LOGO_DATA_URL || "";
+
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_WINDOW_MS = 5 * 60 * 1000;
+const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;
+
+function isLoginRateLimited(ip) {
+  const now = Date.now();
+  const record = loginAttempts.get(ip) || { count: 0, firstAt: now, lockedUntil: 0 };
+  if (record.lockedUntil > now) return true;
+  return false;
+}
+
+function recordLoginFailure(ip) {
+  const now = Date.now();
+  const record = loginAttempts.get(ip) || { count: 0, firstAt: now, lockedUntil: 0 };
+  if (now - record.firstAt > LOGIN_WINDOW_MS) {
+    record.count = 1;
+    record.firstAt = now;
+  } else {
+    record.count += 1;
+  }
+  if (record.count >= LOGIN_MAX_ATTEMPTS) record.lockedUntil = now + LOGIN_LOCKOUT_MS;
+  loginAttempts.set(ip, record);
+}
+
+function clearLoginFailures(ip) {
+  loginAttempts.delete(ip);
+}
 
 function escapeHtml(value) {
   return String(value || "").replace(/[&<>"']/g, (ch) => ({
@@ -220,8 +261,8 @@ function createSession(res, username) {
   sessions.set(sid, { username, createdAt: Date.now(), expiresAt: Date.now() + SESSION_MAX_AGE * 1000 });
   saveAuthStore();
   res.setHeader("set-cookie", [
-    `nova_session=${encodeURIComponent(sid)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_MAX_AGE}`,
-    `nova_last_user=${encodeURIComponent(username)}; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_MAX_AGE}`,
+    `nova_session=${encodeURIComponent(sid)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_MAX_AGE}`,
+    `nova_last_user=${encodeURIComponent(username)}; Secure; SameSite=Strict; Path=/; Max-Age=${SESSION_MAX_AGE}`,
   ]);
 }
 
@@ -474,13 +515,20 @@ const server = http.createServer(async (req, res) => {
     return sendText(res, 200, loginPage("", parseCookies(req).nova_last_user || ADMIN_USER), "text/html; charset=utf-8");
   }
   if (url.pathname === "/login" && req.method === "POST") {
+    const clientIp = req.socket.remoteAddress || "unknown";
+    if (isLoginRateLimited(clientIp)) {
+      log("login_rate_limited", { ip: clientIp });
+      return sendText(res, 429, loginPage("Too many failed attempts. Please wait 15 minutes.", ""), "text/html; charset=utf-8");
+    }
     const form = parseForm(await readBody(req));
     const username = cleanText(form.username).toLowerCase();
     const user = users.get(username);
     if (!user || !verifyPassword(form.password, user.passwordHash)) {
-      log("login_failed", { username });
+      recordLoginFailure(clientIp);
+      log("login_failed", { username, ip: clientIp });
       return sendText(res, 401, loginPage("Invalid username or password.", username || parseCookies(req).nova_last_user), "text/html; charset=utf-8");
     }
+    clearLoginFailures(clientIp);
     createSession(res, user.username);
     log("login", { username: user.username });
     res.writeHead(302, { location: "/", "cache-control": "no-store" });
@@ -491,7 +539,7 @@ const server = http.createServer(async (req, res) => {
     if (sid) sessions.delete(sid);
     saveAuthStore();
     res.writeHead(200, {
-      "set-cookie": "nova_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
+      "set-cookie": "nova_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0",
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
     });

@@ -10,6 +10,8 @@ services:
       - key: ADMIN_USER
         value: admin
       - key: ADMIN_PASS
-        value: nova2026
+        sync: false
       - key: ROBOT_TOKEN
+        sync: false
+      - key: SESSION_SECRET
         sync: false

@@ -1,5 +1,27 @@
 package com.codex.novamessenger
 
+import java.util.concurrent.atomic.AtomicReference
+
+enum class VisionMode { NONE, CAMERA_PREVIEW, DETECTION_WATCH }
+
+class VisionManager {
+    private val current = AtomicReference(VisionMode.NONE)
+
+    val activeMode: VisionMode get() = current.get()
+
+    fun tryAcquire(mode: VisionMode): Boolean =
+        current.compareAndSet(VisionMode.NONE, mode) || current.get() == mode
+
+    fun release(mode: VisionMode) {
+        current.compareAndSet(mode, VisionMode.NONE)
+    }
+
+    fun forceAcquire(mode: VisionMode): VisionMode {
+        val previous = current.getAndSet(mode)
+        return previous
+    }
+}
+
 data class MapPoint(
     val name: String,
     val status: Int = 0,

@@ -7,6 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.lang.reflect.Method
 import java.lang.reflect.Proxy
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 import kotlin.math.max
@@ -15,6 +16,7 @@ import kotlin.math.min
 class ReflectionRobotAdapter(private val context: Context) : RobotAdapter {
     private val reqIds = AtomicInteger(4000)
     private val main = Handler(Looper.getMainLooper())
+    private val methodCache = ConcurrentHashMap<String, List<Method>>()
     private val robotApiClass = classOrNull("com.ainirobot.coreservice.client.RobotApi")
     private val personApiClass = classOrNull("com.ainirobot.coreservice.client.person.PersonApi")
     private val settingApiClass = firstClass(
@@ -215,7 +217,10 @@ class ReflectionRobotAdapter(private val context: Context) : RobotAdapter {
         runCatching { getField("INSTANCE").get(null) }.getOrNull()
 
     private fun invokeBest(target: Any, name: String, vararg args: Any?): InvokeResult {
-        val methods = target.javaClass.methods.filter { it.name == name && it.parameterTypes.size == args.size }
+        val cacheKey = "${target.javaClass.name}#$name/${args.size}"
+        val methods = methodCache.getOrPut(cacheKey) {
+            target.javaClass.methods.filter { it.name == name && it.parameterTypes.size == args.size }
+        }
         for (method in methods) {
             val converted = convertArgs(method, args) ?: continue
             val value = runCatching { method.invoke(target, *converted) }
@@ -225,7 +230,10 @@ class ReflectionRobotAdapter(private val context: Context) : RobotAdapter {
     }
 
     private fun invokeStaticBest(target: Class<*>, name: String, vararg args: Any?): InvokeResult {
-        val methods = target.methods.filter { it.name == name && it.parameterTypes.size == args.size }
+        val cacheKey = "${target.name}#static#$name/${args.size}"
+        val methods = methodCache.getOrPut(cacheKey) {
+            target.methods.filter { it.name == name && it.parameterTypes.size == args.size }
+        }
         for (method in methods) {
             val converted = convertArgs(method, args) ?: continue
             val value = runCatching { method.invoke(null, *converted) }

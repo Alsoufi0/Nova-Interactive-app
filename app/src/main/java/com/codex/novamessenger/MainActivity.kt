@@ -55,6 +55,8 @@ class MainActivity : Activity() {
     private lateinit var cloudRelay: CloudRelayClient
     private lateinit var careRepo: CareRepository
 
+    private val visionManager = VisionManager()
+
     private lateinit var statusView: TextView
     private lateinit var sdkBadge: TextView
     private lateinit var queueBadge: TextView
@@ -68,26 +70,26 @@ class MainActivity : Activity() {
     private lateinit var scrollView: ScrollView
 
     private var currentPage = "home"
-    private var lastStatus = "Starting Nova Concierge."
-    private var lastBattery = "Battery --"
+    @Volatile private var lastStatus = "Starting Nova Concierge."
+    @Volatile private var lastBattery = "Battery --"
     private var clientName = ""
-    private var selectedDestination = "Reception"
+    @Volatile private var selectedDestination = "Reception"
     private var messageDraft = ""
     private var recordingPath: String? = null
     private var isRecording = false
     private var autoDeliverAfterRecording = false
-    private var guestAssistEnabled = false
-    private var securityEnabled = false
-    private var securityEvents = 0
+    @Volatile private var guestAssistEnabled = false
+    @Volatile private var securityEnabled = false
+    @Volatile private var securityEvents = 0
     private var lastSecurityAlertAt = 0L
     private var lastGuestGreetingAt = 0L
-    private var lastMapPoints: List<MapPoint> = emptyList()
-    private var currentTaskTitle = "Nova Care Assistant"
-    private var currentTaskStage = "Ready"
-    private var currentTaskNext = "Awaiting request"
-    private var currentTaskProgress = 0
-    private var lastDetectedPerson = "None"
-    private var safetyStopStatus = "Armed"
+    @Volatile private var lastMapPoints: List<MapPoint> = emptyList()
+    @Volatile private var currentTaskTitle = "Nova Care Assistant"
+    @Volatile private var currentTaskStage = "Ready"
+    @Volatile private var currentTaskNext = "Awaiting request"
+    @Volatile private var currentTaskProgress = 0
+    @Volatile private var lastDetectedPerson = "None"
+    @Volatile private var safetyStopStatus = "Armed"
     private var activeRoundIds: List<String> = emptyList()
     private var activeRoundIndex = -1
     private var speechRecognizer: SpeechRecognizer? = null
@@ -136,6 +138,8 @@ class MainActivity : Activity() {
         careRepo = CareRepository(this)
         follow = ShapeFollowController(robot) { setStatus(it) }
         remoteServer = RemoteControlServer(
+            username = prefs.getString("remote_username", "admin") ?: "admin",
+            password = localServerPassword(),
             statusProvider = { remoteStatus() },
             peopleProvider = { robot.getBodyTargets() },
             pointsProvider = { lastMapPoints },
@@ -2219,6 +2223,15 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun localServerPassword(): String {
+        val existing = prefs.getString("remote_password", "").orEmpty()
+        if (existing.isNotBlank()) return existing
+        val generated = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
+        prefs.edit().putString("remote_password", generated).apply()
+        Log.i("NovaRemote", "Generated local server password. Check Nova Control settings to view it.")
+        return generated
+    }
+
     private fun template(text: String) {
         setMessageText(text)
         setStatus("Template loaded.")
@@ -2346,12 +2359,14 @@ class MainActivity : Activity() {
     }
 
     private fun startCameraFeed() {
-        if (securityEnabled) {
+        val previous = visionManager.forceAcquire(VisionMode.CAMERA_PREVIEW)
+        if (previous == VisionMode.DETECTION_WATCH) {
             securityEnabled = false
             securityHandler.removeCallbacks(securityTick)
-            setStatus("Detection Watch paused. Opening raw camera feed.")
+            setStatus("Detection Watch stopped. Opening raw camera feed.")
         }
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            visionManager.release(VisionMode.CAMERA_PREVIEW)
             requestPermissions(arrayOf(Manifest.permission.CAMERA), 8)
             setStatus("Camera permission requested. Accept it on Nova, then open camera again.")
             return
@@ -2362,6 +2377,7 @@ class MainActivity : Activity() {
     }
 
     private fun stopCameraFeed() {
+        visionManager.release(VisionMode.CAMERA_PREVIEW)
         cameraFeed.stop()
         setStatus("Camera feed closed.")
         if (currentPage == "camera") setContentView(buildUi())
@@ -2399,10 +2415,10 @@ class MainActivity : Activity() {
 
     private fun startSecurityWatch() {
         if (!hasAudioPermission()) requestPermissionsIfNeeded()
-        if (cameraFeed.isRunning) {
+        val previous = visionManager.forceAcquire(VisionMode.DETECTION_WATCH)
+        if (previous == VisionMode.CAMERA_PREVIEW) {
             cameraFeed.stop()
-            currentPage = "camera"
-            setContentView(buildUi())
+            if (currentPage == "camera") setContentView(buildUi())
             setStatus("Camera feed closed. Detection Watch uses RobotAPI vision.")
         }
         securityEnabled = true
@@ -2416,6 +2432,7 @@ class MainActivity : Activity() {
 
     private fun stopSecurityWatch() {
         securityEnabled = false
+        visionManager.release(VisionMode.DETECTION_WATCH)
         securityHandler.removeCallbacks(securityTick)
         setStatus("Security watch stopped.")
         if (currentPage == "camera") setContentView(buildUi())
