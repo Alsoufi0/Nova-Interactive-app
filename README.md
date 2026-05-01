@@ -76,14 +76,14 @@ The project is configured with:
 The production internet console is now the Render cloud relay:
 
 ```text
-https://nova-cloud-relay.onrender.com
+https://your-relay.onrender.com
 ```
 
 Login:
 
 ```text
-Username: admin
-Password: nova2026
+Username: <your-admin-user>
+Password: <your-password>
 ```
 
 Nova connects outbound to this relay, so a phone can reach it from anywhere without keeping a laptop connected by ADB. The relay can show Nova online status, map points, camera snapshots, people detections, residents, reminders, alerts, and care logs. It can send commands for visitor guide, family message delivery, staff alert, check-in round, resident check-in, medication reminder, safety detection, camera open/close, charge, and emergency stop.
@@ -110,8 +110,8 @@ http://<nova-ip-address>:8787
 Default login:
 
 ```text
-Username: admin
-Password: nova2026
+Username: <your-admin-user>
+Password: <your-password>
 ```
 
 From the same Wi-Fi network, open the URL shown on Nova's home screen. The console can start/stop follow, use Door Follow, guide to map points, send a typed message to a point, start detection watch, stop the robot, and view RobotAPI status, detected people, and loaded map points.
@@ -150,7 +150,7 @@ Camera Feed and Detection Watch are separate controls. Detection Watch uses Orio
 Current verified Nova URL from the installed debug app:
 
 ```text
-http://10.29.108.26:8787
+http://<nova-ip>:8787
 ```
 
 To reach that URL from outside the building with the Windows machine as the tunnel bridge:
@@ -160,13 +160,13 @@ To reach that URL from outside the building with the Windows machine as the tunn
 3. Advertise and approve the LAN route that contains Nova:
 
    ```text
-   10.29.0.0/16
+   <your-local-subnet>
    ```
 
 4. From the phone, connect Tailscale and open:
 
    ```text
-   http://10.29.108.26:8787
+   http://<nova-ip>:8787
    ```
 
 ## Important Files

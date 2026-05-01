@@ -88,13 +88,12 @@ class CloudRelayClient(
         val iterator = pendingResults.iterator()
         while (iterator.hasNext()) {
             val (id, result) = iterator.next()
-            runCatching {
+            val sent = runCatching {
                 postJson("$base/robot/result", JSONObject().put("id", id).put("result", result), token)
                 iterator.remove()
                 Log.d(TAG, "Flushed pending result for command $id")
-            }.onFailure {
-                break
-            }
+            }.isSuccess
+            if (!sent) break
         }
     }
 
