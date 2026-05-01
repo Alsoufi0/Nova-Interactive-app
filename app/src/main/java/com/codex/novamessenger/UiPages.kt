@@ -82,7 +82,7 @@ internal fun MainActivity.homePage(): View {
     root.addView(homeCommandGrid())
     root.addView(buttonRow(
         actionButton("Stop Task", Danger) { stopAll() },
-        actionButton("Guest Assist", Accent) { guestAssist.guestAssist.startGuestAssist(auto = false) }
+        actionButton("Guest Assist", Accent) { guestAssist.startGuestAssist(auto = false) }
     ))
     return root
 }
