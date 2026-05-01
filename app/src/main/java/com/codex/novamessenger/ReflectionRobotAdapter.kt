@@ -345,9 +345,15 @@ class ShapeFollowController(
         start(FollowMode.OPEN)
     }
 
+    fun startNarrowMode() {
+        start(FollowMode.NARROW)
+    }
+
     fun startDoorMode() {
         start(FollowMode.DOOR)
     }
+
+    fun isNarrowMode(): Boolean = running && mode == FollowMode.NARROW
 
     private fun start(nextMode: FollowMode) {
         mode = nextMode
@@ -411,6 +417,7 @@ class ShapeFollowController(
         val angularStep: Double
     ) {
         OPEN("Open", 1.35, 0.9, 0.08, 0.16, 0.48, 0.36, 36.0, 0.68, 26.0, 0.02, 280, 0.50, 0.55, 0.10, 0.18),
+        NARROW("Narrow aisle", 1.05, 0.80, 0.07, 0.10, 0.34, 0.26, 48.0, 0.38, 18.0, 0.04, 290, 0.40, 0.42, 0.06, 0.09),
         DOOR("Door", 1.05, 0.82, 0.07, 0.08, 0.22, 0.20, 50.0, 0.32, 14.0, 0.06, 280, 0.40, 0.46, 0.055, 0.10)
     }
 }

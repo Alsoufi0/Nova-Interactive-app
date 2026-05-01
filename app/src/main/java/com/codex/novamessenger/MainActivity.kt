@@ -465,6 +465,15 @@ class MainActivity : Activity() {
         }
     }
 
+    internal fun startNarrowFollowMode() {
+        prepareRobotVisionForMotion {
+            securityEnabled = false
+            securityHandler.removeCallbacks(securityTick)
+            setStatus("Narrow-aisle follow active. Keep 1 m ahead and stay centered.")
+            follow.startNarrowMode()
+        }
+    }
+
     internal fun startDoorFollowMode() {
         prepareRobotVisionForMotion {
             securityEnabled = false

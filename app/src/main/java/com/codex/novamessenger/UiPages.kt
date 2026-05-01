@@ -185,14 +185,9 @@ internal fun MainActivity.messagePage(): View {
 
 internal fun MainActivity.carePage(): View {
     val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    root.addView(pageHero("Care Command", "Rounds, reminders, staff alerts, family delivery, and care logs."))
-    val left = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        addView(careCommandPanel())
-        addView(careTodayPanel())
-    }
-    val right = residentsPanel()
-    root.addView(twoPane(left, right, 0.82f, 1.18f))
+    root.addView(pageHero("Care Rounds", "Check-ins, medication reminders, and resident visits."))
+    root.addView(careActionsPanel())
+    root.addView(careResidentsPanel())
     return root
 }
 
@@ -206,8 +201,9 @@ internal fun MainActivity.destinationsPage(): View {
 
 internal fun MainActivity.robotPage(): View {
     val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    root.addView(pageHero("Robot Systems", "Movement, follow, charging, voice, battery, and safety controls."))
-    root.addView(twoPane(robotHealthCard(), robotActionsCard(), 1f, 1f))
+    root.addView(pageHero("Follow Mode", "Nova follows a person — choose the right profile for your space."))
+    root.addView(followProfilePanel())
+    root.addView(followActionsCard())
     return root
 }
 
@@ -1201,4 +1197,196 @@ internal fun MainActivity.robotControlsCard(): View {
         actionButton("Charge", PrimaryDark) { setStatus(robot.goCharge().message) }
     ))
     return card
+}
+
+// ── Follow page ────────────────────────────────────────────────────────────────
+
+internal fun MainActivity.followProfilePanel(): View {
+    val box = card()
+    box.addView(TextView(this).apply {
+        text = "Follow Profile"
+        textSize = 15f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(Text)
+    })
+    val isNarrow = follow.isNarrowMode()
+    box.addView(buttonRow(
+        followProfileTile(
+            "Open Hall",
+            "Wide corridors & lobbies",
+            Good,
+            !isNarrow && follow.isRunning()
+        ) { startFollowMode() },
+        followProfileTile(
+            "Narrow Aisle",
+            "~1 m corridor, twice Nova width",
+            Accent,
+            isNarrow
+        ) { startNarrowFollowMode() }
+    ))
+    val targets = runCatching { robot.getBodyTargets() }.getOrDefault(emptyList())
+    val nearest = targets.minByOrNull { it.distanceMeters }
+    val statusText = when {
+        follow.isRunning() && nearest != null -> "Following at ${"%.1f".format(nearest.distanceMeters)} m"
+        follow.isRunning() -> "Searching for person..."
+        nearest != null -> "Person detected at ${"%.1f".format(nearest.distanceMeters)} m — press a profile to start"
+        else -> "No person in view — stand 1–2 m in front of Nova, then press a profile"
+    }
+    val statusColor = if (follow.isRunning()) Good else Muted
+    val statusBg = if (follow.isRunning()) Color.rgb(232, 248, 235) else Color.rgb(245, 248, 250)
+    box.addView(TextView(this).apply {
+        text = statusText
+        textSize = 14f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(statusColor)
+        background = rounded(statusBg, dp(8), Stroke)
+        setPadding(dp(12), dp(10), dp(12), dp(10))
+        layoutParams = full().apply { topMargin = dp(8) }
+    })
+    return box
+}
+
+internal fun MainActivity.followProfileTile(title: String, subtitle: String, color: Int, active: Boolean, onClick: () -> Unit): View {
+    val bg = if (active) Color.argb(28, Color.red(color), Color.green(color), Color.blue(color)) else Color.WHITE
+    val border = if (active) color else Stroke
+    val box = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER
+        background = rounded(bg, dp(12), border)
+        setPadding(dp(10), dp(16), dp(10), dp(16))
+        minimumHeight = dp(88)
+        setOnClickListener { onClick() }
+    }
+    box.addView(TextView(this).apply {
+        text = title
+        textSize = 16f
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        setTextColor(if (active) color else Text)
+    })
+    box.addView(TextView(this).apply {
+        text = subtitle
+        textSize = 10f
+        gravity = Gravity.CENTER
+        setTextColor(Muted)
+        setPadding(0, dp(4), 0, 0)
+    })
+    return box
+}
+
+internal fun MainActivity.followActionsCard(): View {
+    val box = card()
+    box.addView(buttonRow(
+        actionButton("Start Following", Good) { startFollowMode() },
+        actionButton("Stop", Danger) { stopAll() }
+    ))
+    box.addView(buttonRow(
+        actionButton("Guide to ${destination()}", Primary) { goToDestination() },
+        actionButton("Go Charge", Neutral) { setStatus(robot.goCharge().message) }
+    ))
+    return box
+}
+
+// ── Care page (client-ready) ───────────────────────────────────────────────────
+
+internal fun MainActivity.careActionsPanel(): View {
+    val box = card()
+    box.addView(buttonRow(
+        careActionTile("Begin\nRounds", "Visit all residents", CareBlue) { careWorkflow.startCareRound() },
+        careActionTile("Medication\nTime", "Deliver a reminder", CareYellow) { careWorkflow.runNextReminder() }
+    ))
+    box.addView(buttonRow(
+        careActionTile("Call for\nHelp", "Alert staff now", Danger) {
+            careWorkflow.createStaffAlert("urgent", "", "Resident or visitor requested assistance.")
+        },
+        careActionTile("Safety\nWatch", "Monitor the area", PrimaryDark) { startSecurityWatch() }
+    ))
+    val pending = careRepo.reminders().filter { it.doneAt == null }
+    if (pending.isNotEmpty()) {
+        box.addView(sectionTitle("Due Today"))
+        pending.take(2).forEach { reminder ->
+            val resident = careRepo.resident(reminder.residentId)
+            box.addView(compactCard("${reminder.timeLabel}  •  ${reminder.title}  •  ${resident?.name ?: ""}") {
+                careWorkflow.runReminder(reminder.id)
+            })
+        }
+    }
+    return box
+}
+
+internal fun MainActivity.careActionTile(title: String, subtitle: String, color: Int, onClick: () -> Unit): View {
+    val box = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER
+        background = rounded(Color.WHITE, dp(12), Color.argb(90, Color.red(color), Color.green(color), Color.blue(color)))
+        setPadding(dp(10), dp(16), dp(10), dp(16))
+        minimumHeight = dp(88)
+        setOnClickListener { onClick() }
+    }
+    box.addView(TextView(this).apply {
+        text = title
+        textSize = 16f
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        setTextColor(color)
+    })
+    box.addView(TextView(this).apply {
+        text = subtitle
+        textSize = 10f
+        gravity = Gravity.CENTER
+        setTextColor(Muted)
+        setPadding(0, dp(4), 0, 0)
+    })
+    return box
+}
+
+internal fun MainActivity.careResidentsPanel(): View {
+    val box = card()
+    box.addView(TextView(this).apply {
+        text = "Residents"
+        textSize = 16f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(Text)
+        setPadding(0, 0, 0, dp(4))
+    })
+    val residents = careRepo.residents()
+    if (residents.isEmpty()) {
+        box.addView(emptyState("No residents configured yet. Add residents in the cloud dashboard to start care rounds."))
+    } else {
+        residents.take(5).forEach { resident -> box.addView(residentRowCard(resident)) }
+    }
+    val logs = careRepo.logs().take(3)
+    if (logs.isNotEmpty()) {
+        box.addView(sectionTitle("Recent Activity"))
+        logs.forEach { box.addView(careLogCard(it)) }
+    }
+    return box
+}
+
+internal fun MainActivity.residentRowCard(resident: CareResident): View {
+    val row = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = rounded(Color.WHITE, dp(10), Stroke)
+        setPadding(dp(12), dp(10), dp(10), dp(10))
+        layoutParams = full().apply { bottomMargin = dp(6) }
+    }
+    val nameBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    nameBox.addView(TextView(this).apply {
+        text = resident.name
+        textSize = 15f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(Text)
+    })
+    nameBox.addView(TextView(this).apply {
+        text = resident.room
+        textSize = 12f
+        setTextColor(Muted)
+        setPadding(0, dp(2), 0, 0)
+    })
+    row.addView(nameBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+    row.addView(actionButton("Visit", CareBlue) { careWorkflow.runResidentCheckIn(resident.id) }.apply {
+        layoutParams = LinearLayout.LayoutParams(dp(72), dp(38))
+    })
+    return row
 }
