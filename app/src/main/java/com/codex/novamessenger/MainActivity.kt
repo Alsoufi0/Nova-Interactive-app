@@ -188,7 +188,8 @@ class MainActivity : Activity() {
             pointsProvider = { lastMapPoints },
             detectionProvider = { remoteDetectionStatus() },
             cameraFrameProvider = { cameraFeed.latestFrame() },
-            commandHandler = { handleRemoteCommand(it) }
+            commandHandler = { handleRemoteCommand(it) },
+            careProvider = { careRepo.toJson().toString() }
         )
         cloudRelay = CloudRelayClient(
             cloudUrlProvider = { prefs.getString("cloud_url", DEFAULT_CLOUD_URL) ?: DEFAULT_CLOUD_URL },
@@ -763,7 +764,35 @@ class MainActivity : Activity() {
                     saveHomeBaseSettings()
                     setStatus("Settings updated from cloud: wait=${vm.roundWaitSeconds}s prompt=${vm.roundPromptSeconds}s sec=${vm.securityCooldownSeconds}s guest=${vm.guestCooldownSeconds}s charge=${vm.returnToChargeAfterRound}")
                 }
+                "upsert_resident" -> {
+                    val id = command.params["id"]?.ifBlank { null } ?: "res_${System.currentTimeMillis()}"
+                    val name = command.params["name"].orEmpty()
+                    if (name.isNotBlank()) {
+                        careRepo.upsertResident(CareResident(
+                            id = id,
+                            name = name,
+                            room = command.params["room"].orEmpty(),
+                            mapPoint = command.params["mapPoint"].orEmpty().ifBlank { "Reception" },
+                            notes = command.params["notes"].orEmpty(),
+                            checkInPrompt = command.params["checkInPrompt"].orEmpty()
+                                .ifBlank { "Hello. I am checking in. Do you need anything?" }
+                        ))
+                        setStatus("Resident $name saved.")
+                    }
+                }
+                "delete_resident" -> {
+                    val id = command.params["id"].orEmpty()
+                    if (id.isNotBlank()) {
+                        careRepo.deleteResident(id)
+                        setStatus("Resident deleted.")
+                    }
+                }
                 else -> setStatus("Unknown phone command: ${command.action}")
+            }
+            if (command.action in setOf("stop", "return_home", "start_rounds", "resident_checkin",
+                    "med_reminder", "staff_alert", "visitor_guide", "update_settings",
+                    "upsert_resident", "delete_resident")) {
+                setContentView(buildUi())
             }
         }
         return "Command sent: ${command.action}"

@@ -19,7 +19,8 @@ class RemoteControlServer(
     private val pointsProvider: () -> List<MapPoint>,
     private val detectionProvider: () -> DetectionStatus,
     private val cameraFrameProvider: () -> ByteArray?,
-    private val commandHandler: (RemoteCommand) -> String
+    private val commandHandler: (RemoteCommand) -> String,
+    private val careProvider: () -> String = { "{}" }
 ) {
     private val running = AtomicBoolean(false)
     private var serverSocket: ServerSocket? = null
@@ -94,6 +95,7 @@ class RemoteControlServer(
                 val result = commandHandler(RemoteCommand(query["action"].orEmpty(), query))
                 HttpResponse("application/json", """{"ok":true,"message":"${esc(result)}"}""")
             }
+            "/care" -> HttpResponse("application/json", careProvider())
             else -> HttpResponse("application/json", """{"ok":false,"message":"not found"}""", 404)
         }
     }
@@ -210,6 +212,16 @@ class RemoteControlServer(
               <button class="ghost" onclick="cmd('camera_stop')">Close Camera</button>
               <p class="muted">Use Detection Watch for RobotAPI person scanning. Camera Feed for live snapshots.</p>
             </div>
+            <div class="panel"><div class="title">Residents</div>
+              <div id="residentList" class="small" style="max-height:160px;overflow:auto">Loading...</div>
+              <hr style="border-color:#1e2a2f;margin:10px 0">
+              <input id="rName" placeholder="Full name *">
+              <input id="rRoom" placeholder="Room / Location">
+              <input id="rPoint" placeholder="Map point (e.g. Reception)">
+              <input id="rNotes" placeholder="Notes (optional)">
+              <button onclick="saveResident()">Save Resident</button>
+              <button class="ghost" id="rCancelBtn" onclick="clearRForm()" style="display:none">Cancel Edit</button>
+            </div>
           </div>
           <div class="panel camera"><div class="title">Live Camera</div><img id="camera" alt="Nova camera feed"><p id="cameraNote" class="muted">Press Open Camera Feed to start.</p></div>
           <div class="grid">
@@ -237,7 +249,20 @@ class RemoteControlServer(
             points.textContent=po.length?JSON.stringify(po,null,2):'No map points loaded.';
             pointChips.innerHTML=po.slice(0,8).map(p=>'<button class="chip" onclick="choosePoint(\''+jsEscape(p.name)+'\')">'+htmlEscape(p.name)+'</button>').join('');
           }
-          setInterval(refresh,2000); refresh()
+          var editingResidentId='';
+          async function loadResidents(){
+            const c=await get('/care'); const rs=c.residents||[];
+            residentList.innerHTML=rs.length?rs.map(function(r){return '<div style="display:flex;align-items:center;gap:6px;margin:4px 0"><span style="flex:1;font-size:13px">'+htmlEscape(r.name)+' &mdash; '+htmlEscape(r.room)+'</span><button class="chip" style="width:auto;padding:5px 9px;font-size:12px" onclick="editRes(\''+jsEscape(r.id)+'\',\''+jsEscape(r.name)+'\',\''+jsEscape(r.room)+'\',\''+jsEscape(r.mapPoint)+'\',\''+jsEscape(r.notes||'')+'\')">Edit</button><button class="chip" style="width:auto;padding:5px 9px;font-size:12px;background:#6a1a1a" onclick="delRes(\''+jsEscape(r.id)+'\')">Del</button></div>';}).join(''):'<span style="color:var(--muted)">No residents yet.</span>';
+          }
+          function editRes(id,name,room,point,notes){editingResidentId=id;rName.value=name;rRoom.value=room;rPoint.value=point;rNotes.value=notes;rCancelBtn.style.display='block'}
+          function clearRForm(){editingResidentId='';rName.value=rRoom.value=rPoint.value=rNotes.value='';rCancelBtn.style.display='none'}
+          async function saveResident(){
+            if(!rName.value.trim())return;
+            await get('/control?action=upsert_resident&id='+encodeURIComponent(editingResidentId)+'&name='+encodeURIComponent(rName.value)+'&room='+encodeURIComponent(rRoom.value)+'&mapPoint='+encodeURIComponent(rPoint.value)+'&notes='+encodeURIComponent(rNotes.value));
+            clearRForm();loadResidents();refresh();
+          }
+          async function delRes(id){if(!confirm('Remove this resident?'))return;await get('/control?action=delete_resident&id='+encodeURIComponent(id));loadResidents();refresh();}
+          setInterval(refresh,2000); setInterval(loadResidents,4000); refresh(); loadResidents();
         </script></body></html>
     """.trimIndent()
 
