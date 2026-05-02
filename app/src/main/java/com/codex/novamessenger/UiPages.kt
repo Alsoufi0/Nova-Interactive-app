@@ -663,17 +663,34 @@ internal fun MainActivity.followActionsCard(): View {
 internal fun MainActivity.settingsPanel(): View {
     val box = card()
 
-    // ── Home Base ─────────────────────────────────────────────────────────────
-    box.addView(TextView(this).apply {
-        text = "Home Base"
-        textSize = 15f
-        typeface = Typeface.DEFAULT_BOLD
-        setTextColor(Text)
-        setPadding(0, dp(4), 0, dp(4))
-    })
+    // ── Mission Behavior ──────────────────────────────────────────────────────
+    val afterMissionLabels = listOf("Return to Home Base", "Stay at Location", "Go Charge", "Ask Operator")
+    val afterMissionKeys  = listOf("home_base",           "stay",             "charge",    "ask")
     val homeBaseOptions = (lastMapPoints.map { it.name } +
         listOf("Reception", "Reception Point", "Lobby", "Entrance", "Charging Point"))
         .distinctBy { it.lowercase() }
+
+    val missionBox = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = rounded(Color.rgb(236, 248, 253), dp(12), Primary)
+        setPadding(dp(14), dp(14), dp(14), dp(14))
+        layoutParams = full().apply { bottomMargin = dp(4) }
+    }
+    missionBox.addView(TextView(this).apply {
+        text = "Mission Behavior"
+        textSize = 16f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(PrimaryDark)
+        setPadding(0, 0, 0, dp(10))
+    })
+
+    val afterMissionDisplay = afterMissionLabels.getOrElse(
+        afterMissionKeys.indexOf(vm.afterMissionBehavior).coerceAtLeast(0)) { "Return to Home Base" }
+    missionBox.addView(buttonRow(
+        compactStatus("Home Base", vm.homeBase),
+        compactStatus("After Mission", afterMissionDisplay)
+    ))
+
     val homeBaseSpinner = Spinner(this).apply {
         background = rounded(Color.WHITE, dp(8), Stroke)
         minimumHeight = dp(48)
@@ -683,8 +700,6 @@ internal fun MainActivity.settingsPanel(): View {
         }
         setSelection(homeBaseOptions.indexOfFirst { it.equals(vm.homeBase, ignoreCase = true) }.coerceAtLeast(0))
     }
-    val afterMissionLabels = listOf("Return to Home Base", "Stay at Location", "Go Charge", "Ask Operator")
-    val afterMissionKeys  = listOf("home_base",           "stay",             "charge",    "ask")
     val afterMissionSpinner = Spinner(this).apply {
         background = rounded(Color.WHITE, dp(8), Stroke)
         minimumHeight = dp(48)
@@ -694,7 +709,7 @@ internal fun MainActivity.settingsPanel(): View {
         }
         setSelection(afterMissionKeys.indexOf(vm.afterMissionBehavior).coerceAtLeast(0))
     }
-    box.addView(twoPane(
+    missionBox.addView(twoPane(
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(label("Home Base Location"))
@@ -702,13 +717,14 @@ internal fun MainActivity.settingsPanel(): View {
         },
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(label("After Mission"))
+            addView(label("After Mission Behavior"))
             addView(afterMissionSpinner, full())
         }
     ))
-    box.addView(actionButton("Return to Home Base Now", Primary) {
+    missionBox.addView(actionButton("Return to Home Base Now", Primary) {
         returnToHomeBase()
-    }.apply { layoutParams = full().apply { topMargin = dp(6) } })
+    }.apply { layoutParams = full().apply { topMargin = dp(10) } })
+    box.addView(missionBox)
 
     // ── Timing ────────────────────────────────────────────────────────────────
     box.addView(TextView(this).apply {

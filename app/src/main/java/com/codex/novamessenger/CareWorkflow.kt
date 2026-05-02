@@ -200,9 +200,22 @@ class CareWorkflow(private val activity: MainActivity) {
         val alert = activity.careRepo.createAlert(priority, resolvedRoom, message)
         val speakMessage = alert.message
 
+        // After delivering the alert the robot waits 5 minutes at the location,
+        // announces if staff has not yet arrived, then returns via handleAfterMission.
+        fun scheduleAlertReturn() {
+            activity.setTask("Staff alert", "Waiting for staff", resolvedRoom, 100)
+            if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
+            Handler(Looper.getMainLooper()).postDelayed({
+                activity.speakReply("Staff has not yet arrived. I will return to my station.")
+                activity.careRepo.log("alert", "Alert timeout", "Waited 5 minutes at $resolvedRoom. Returning.", null, resolvedRoom)
+                activity.handleAfterMission("Staff alert")
+                if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
+            }, ALERT_WAIT_MS)
+        }
+
         if (room.isNotBlank()) {
-            val destinationPoint = resolveMapPoint(resolvedRoom)
-            activity.setDestinationText(destinationPoint)
+            val dest = resolveMapPoint(resolvedRoom)
+            activity.runOnUiThread { activity.setDestinationText(dest) }
             activity.follow.stop()
             activity.setTask("Staff alert", "Navigating", "Speak alert at $resolvedRoom", 55)
             activity.setStatus("Alert: navigating to $resolvedRoom...")
@@ -212,11 +225,10 @@ class CareWorkflow(private val activity: MainActivity) {
                 activity.runOnUiThread {
                     activity.setTask("Staff alert", "Speaking", "Waiting for staff", 85)
                     activity.speakReply(speakMessage)
-                    activity.setTask("Staff alert delivered", "Waiting for staff", resolvedRoom, 100)
-                    if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
+                    scheduleAlertReturn()
                 }
             }
-            val result = activity.robot.startNavigation(destinationPoint) { status ->
+            val result = activity.robot.startNavigation(dest) { status ->
                 activity.setStatus(status)
                 val lower = status.lowercase()
                 when {
@@ -225,16 +237,22 @@ class CareWorkflow(private val activity: MainActivity) {
                 }
             }
             if (!result.ok) {
-                activity.speakReply(speakMessage)
-                activity.setTask("Staff alert", "Waiting for staff", resolvedRoom, 80)
-                activity.setStatus("Staff alert ${alert.priority}: ${alert.message}")
+                activity.runOnUiThread {
+                    activity.speakReply(speakMessage)
+                    scheduleAlertReturn()
+                }
             }
         } else {
-            activity.setTask("Staff alert", "Waiting for staff", resolvedRoom, 80)
-            activity.speakReply(speakMessage)
-            activity.setStatus("Staff alert ${alert.priority}: ${alert.message}")
+            activity.runOnUiThread {
+                activity.speakReply(speakMessage)
+                scheduleAlertReturn()
+            }
         }
-        if (activity.currentPage == "care") activity.runOnUiThread { activity.setContentView(activity.buildUi()) }
+        activity.runOnUiThread { if (activity.currentPage == "care") activity.setContentView(activity.buildUi()) }
+    }
+
+    companion object {
+        private const val ALERT_WAIT_MS = 5 * 60 * 1000L
     }
 
     fun runVisitorGuide(destinationName: String) {
