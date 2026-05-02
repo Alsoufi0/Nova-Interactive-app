@@ -33,6 +33,8 @@ class NovaViewModel {
     var returnToChargeAfterRound = false
     @Volatile var homeBase = "Reception"
     var afterMissionBehavior = "home_base"  // "home_base" | "stay" | "charge" | "ask"
+    var batteryLowPercent = 20
+    @Volatile var batteryChargeTriggered = false
 
     fun setTask(title: String, stage: String, next: String, progress: Int) {
         currentTaskTitle = title

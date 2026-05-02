@@ -134,6 +134,10 @@ class CareRepository(context: Context) {
         return alert
     }
 
+    fun clearLogs() = prefs.edit().putString("logs", "[]").apply()
+    fun clearAlerts() = prefs.edit().putString("alerts", "[]").apply()
+    fun resetReminders() = saveReminders(reminders().map { it.copy(doneAt = null) })
+
     fun upsertResident(resident: CareResident) {
         val list = residents().toMutableList()
         val idx = list.indexOfFirst { it.id == resident.id }

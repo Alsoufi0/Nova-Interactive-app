@@ -259,6 +259,7 @@ internal fun MainActivity.carePage(): View {
     root.addView(pageHero("Care Rounds", "Check-ins, medication reminders, and resident visits."))
     root.addView(careActionsPanel())
     root.addView(careResidentsPanel())
+    root.addView(careToolsCard())
     return root
 }
 
@@ -672,6 +673,43 @@ internal fun MainActivity.careLogCard(log: CareLog): View =
         setStatus("${log.title}: ${log.detail}")
     }
 
+internal fun MainActivity.careToolsCard(): View {
+    val box = card()
+    box.addView(TextView(this).apply {
+        text = "Demo / Compliance"
+        textSize = 13f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(Muted)
+        setPadding(0, 0, 0, dp(8))
+    })
+    box.addView(buttonRow(
+        actionButton("Clear Activity Log", Neutral) {
+            AlertDialog.Builder(this@careToolsCard)
+                .setTitle("Clear Activity Log")
+                .setMessage("Remove all logged care activities and alerts? This cannot be undone.")
+                .setPositiveButton("Clear") { _, _ ->
+                    careRepo.clearLogs()
+                    careRepo.clearAlerts()
+                    setContentView(buildUi())
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        },
+        actionButton("Reset Reminders", Warning) {
+            AlertDialog.Builder(this@careToolsCard)
+                .setTitle("Reset Reminders")
+                .setMessage("Mark all medication reminders as pending again?")
+                .setPositiveButton("Reset") { _, _ ->
+                    careRepo.resetReminders()
+                    setContentView(buildUi())
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+    ))
+    return box
+}
+
 // ── Follow panels ─────────────────────────────────────────────────────────────
 
 internal fun MainActivity.followProfilePanel(): View {
@@ -848,6 +886,9 @@ internal fun MainActivity.settingsPanel(): View {
     val guestCooldownInput = input("Seconds (10–300)", vm.guestCooldownSeconds.toString()).apply {
         inputType = android.text.InputType.TYPE_CLASS_NUMBER
     }
+    val batteryLowInput = input("% (5–50)", vm.batteryLowPercent.toString()).apply {
+        inputType = android.text.InputType.TYPE_CLASS_NUMBER
+    }
     box.addView(twoPane(
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -855,6 +896,8 @@ internal fun MainActivity.settingsPanel(): View {
             addView(roundWaitInput, full())
             addView(label("Follow-up prompt at (s)"))
             addView(roundPromptInput, full())
+            addView(label("Battery low → auto-charge (%)"))
+            addView(batteryLowInput, full())
         },
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -895,6 +938,7 @@ internal fun MainActivity.settingsPanel(): View {
         vm.roundPromptSeconds = promptS
         vm.securityCooldownSeconds = secCooldownInput.text.toString().toIntOrNull()?.coerceIn(5, 300) ?: 30
         vm.guestCooldownSeconds = guestCooldownInput.text.toString().toIntOrNull()?.coerceIn(10, 300) ?: 45
+        vm.batteryLowPercent = batteryLowInput.text.toString().toIntOrNull()?.coerceIn(5, 50) ?: 20
         saveTimingSettings()
         saveCloudSettings(cloudUrlInput.text.toString(), cloudTokenInput.text.toString())
     }.apply { layoutParams = full().apply { topMargin = dp(10) } })

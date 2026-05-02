@@ -101,6 +101,7 @@ class MainActivity : Activity() {
     internal val assistHandler = Handler(Looper.getMainLooper())
     private val securityHandler = Handler(Looper.getMainLooper())
     private val mapHandler = Handler(Looper.getMainLooper())
+    private val batteryHandler = Handler(Looper.getMainLooper())
     internal val guestAssistTick = object : Runnable {
         override fun run() {
             if (!guestAssistEnabled) return
@@ -124,6 +125,33 @@ class MainActivity : Activity() {
             mapHandler.postDelayed(this, 15_000)
         }
     }
+    private val batteryTick = object : Runnable {
+        override fun run() {
+            if (!isFinishing && ::robot.isInitialized) {
+                Thread {
+                    val info = runCatching { robot.batteryInfo() }.getOrDefault(lastBattery)
+                    lastBattery = info
+                    val pct = Regex("\\d+").find(info)?.value?.toIntOrNull()
+                    val charging = info.contains("charging", ignoreCase = true)
+                    if (charging) vm.batteryChargeTriggered = false
+                    if (pct != null && pct <= vm.batteryLowPercent && !charging
+                        && !vm.batteryChargeTriggered && !safetyStopStatus.contains("Stopped")) {
+                        vm.batteryChargeTriggered = true
+                        runOnUiThread {
+                            speakReply("Battery is low at $pct percent. Going to charge now.")
+                            setTask("Going to charge", "Low battery $pct%", "Reach charging station", 50)
+                            setStatus("Low battery ($pct%). Auto-charging...")
+                        }
+                        careRepo.log("system", "Battery low", "Auto-charge triggered at $pct%.", null, null)
+                        val result = robot.goCharge()
+                        if (!result.ok) runOnUiThread { setStatus("Battery low. Charge failed: ${result.message}") }
+                        runOnUiThread { setContentView(buildUi()) }
+                    }
+                }.start()
+            }
+            batteryHandler.postDelayed(this, 30_000)
+        }
+    }
     private var mapLoadInFlight = false
     private var lastMapLoadAt = 0L
 
@@ -142,6 +170,7 @@ class MainActivity : Activity() {
         vm.returnToChargeAfterRound = prefs.getBoolean("return_to_charge_after_round", false)
         vm.homeBase = prefs.getString("home_base", "Reception") ?: "Reception"
         vm.afterMissionBehavior = prefs.getString("after_mission_behavior", "home_base") ?: "home_base"
+        vm.batteryLowPercent = prefs.getInt("battery_low_percent", 20)
         robot = DirectNovaRobotAdapter(this)
         cameraFeed = CameraFeedManager(this)
         voice = VoiceMessageManager(this)
@@ -182,6 +211,7 @@ class MainActivity : Activity() {
             }
         }
         mapHandler.postDelayed(mapRefreshTick, 10_000)
+        batteryHandler.postDelayed(batteryTick, 60_000)
         setStatus(if (robot.isRobotSdkAvailable) "RobotAPI is connecting. Controls will become live on Nova." else "Preview mode. RobotAPI was not found on this device.")
         Handler(Looper.getMainLooper()).postDelayed({
             if (!isFinishing) guestAssist.startGuestAssist(auto = true)
@@ -206,6 +236,7 @@ class MainActivity : Activity() {
         assistHandler.removeCallbacksAndMessages(null)
         securityHandler.removeCallbacksAndMessages(null)
         mapHandler.removeCallbacksAndMessages(null)
+        batteryHandler.removeCallbacksAndMessages(null)
         speechRecognizer?.destroy()
         speechRecognizer = null
         cameraFeed.stop()
@@ -742,6 +773,7 @@ class MainActivity : Activity() {
             .putInt("security_cooldown_seconds", vm.securityCooldownSeconds)
             .putInt("guest_cooldown_seconds", vm.guestCooldownSeconds)
             .putBoolean("return_to_charge_after_round", vm.returnToChargeAfterRound)
+            .putInt("battery_low_percent", vm.batteryLowPercent)
             .apply()
     }
 
