@@ -168,9 +168,8 @@ class MessageDelivery(private val activity: MainActivity) {
         })
         card.addView(activity.buttonGrid(
             2,
-            activity.actionButton("Navigate") {
-                activity.setDestinationText(message.destination)
-                activity.goToDestination()
+            activity.actionButton("Deliver") {
+                deliverMessage(message)
             },
             activity.actionButton("Play") {
                 playDeliveredMessage(message)

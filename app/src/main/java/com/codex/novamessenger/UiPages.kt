@@ -258,6 +258,7 @@ internal fun MainActivity.carePage(): View {
     val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     root.addView(pageHero("Care Rounds", "Check-ins, medication reminders, and resident visits."))
     root.addView(careActionsPanel())
+    if (careRepo.alerts().isNotEmpty()) root.addView(activeAlertsPanel())
     root.addView(careResidentsPanel())
     root.addView(careToolsCard())
     return root
@@ -401,6 +402,12 @@ internal fun MainActivity.workflowCard(): View {
         actionButton("Save Text", Neutral) { messageDelivery.saveTextOnlyMessage() },
         actionButton("Speak", PrimaryDark) { messageDelivery.speakCurrentMessage() }
     ))
+    card.addView(actionButton("Send Now  →  ${destination()}", Accent) {
+        messageDelivery.sendCurrentMessageToPoint()
+    }.apply {
+        textSize = 14f
+        layoutParams = full().apply { topMargin = dp(10) }
+    })
     return card
 }
 
@@ -672,6 +679,52 @@ internal fun MainActivity.careLogCard(log: CareLog): View =
     compactCard("${log.title}\n${log.detail}") {
         setStatus("${log.title}: ${log.detail}")
     }
+
+internal fun MainActivity.activeAlertsPanel(): View {
+    val alerts = careRepo.alerts()
+    val box = LinearLayout(this@activeAlertsPanel).apply {
+        orientation = LinearLayout.VERTICAL
+        background = rounded(Color.rgb(255, 237, 237), dp(10), Danger)
+        setPadding(dp(12), dp(10), dp(12), dp(10))
+        layoutParams = full().apply { bottomMargin = dp(6) }
+    }
+    box.addView(TextView(this@activeAlertsPanel).apply {
+        text = "Active Staff Alerts  •  ${alerts.size}"
+        textSize = 14f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(Danger)
+        setPadding(0, 0, 0, dp(8))
+    })
+    alerts.take(4).forEach { alert ->
+        val row = LinearLayout(this@activeAlertsPanel).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            background = rounded(Color.WHITE, dp(8), Stroke)
+            setPadding(dp(10), dp(8), dp(8), dp(8))
+            layoutParams = full().apply { bottomMargin = dp(6) }
+        }
+        row.addView(TextView(this@activeAlertsPanel).apply {
+            text = "${alert.priority.replaceFirstChar { it.uppercaseChar() }}  •  ${alert.room.ifBlank { "On site" }}  —  ${alert.message}"
+            textSize = 13f
+            setTextColor(Text)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        row.addView(actionButton("Dismiss", Neutral) {
+            careRepo.dismissAlert(alert.id)
+            setContentView(buildUi())
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(dp(84), dp(36))
+        })
+        box.addView(row)
+    }
+    if (alerts.size > 1) {
+        box.addView(actionButton("Dismiss All", Warning) {
+            careRepo.clearAlerts()
+            setContentView(buildUi())
+        }.apply { layoutParams = full().apply { topMargin = dp(4) } })
+    }
+    return box
+}
 
 internal fun MainActivity.careToolsCard(): View {
     val box = card()
@@ -1008,10 +1061,16 @@ internal fun MainActivity.header(): View {
     })
     top.addView(titleBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
     sdkBadge = badge(if (robotReadySoon()) "Robot mode" else "Preview mode", Accent)
-    queueBadge = badge("Queue 0", Color.rgb(245, 184, 81))
-    recordingBadge = badge("Ready", Good)
-    assistBadge = badge("Assist off", Neutral)
+    queueBadge = badge("Queue ${repo.pendingCount()}", Color.rgb(200, 145, 40))
+    recordingBadge = badge(if (isRecording) "Recording" else "Ready", if (isRecording) Danger else Good)
+    assistBadge = badge(if (guestAssistEnabled) "Assist on" else "Assist off", if (guestAssistEnabled) Accent else Neutral)
     top.addView(sdkBadge)
+    top.addView(queueBadge, LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+    ).also { it.marginStart = dp(4) })
+    top.addView(recordingBadge, LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+    ).also { it.marginStart = dp(4) })
     box.addView(top)
     statusView = TextView(this).apply {
         text = "Unit 01  |  ${if (robot.isRobotSdkAvailable) "Online" else "Preview"}  |  ${lastBattery.replace("Battery ", "")}  |  ${SimpleDateFormat("MMM d, h:mm a", Locale.US).format(Date())}"

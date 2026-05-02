@@ -440,7 +440,7 @@ class MainActivity : Activity() {
     internal fun setStatus(text: String) {
         lastStatus = text
         runOnUiThread {
-            if (::statusView.isInitialized) statusView.text = text.take(72)
+            if (::statusView.isInitialized) statusView.text = text.take(110)
             if (::sdkBadge.isInitialized) sdkBadge.text = if (robot.isRobotSdkAvailable) "Robot mode" else "Preview mode"
             if (::assistBadge.isInitialized && !guestAssistEnabled) assistBadge.text = "Assist off"
         }

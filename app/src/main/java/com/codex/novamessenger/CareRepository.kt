@@ -136,6 +136,7 @@ class CareRepository(context: Context) {
 
     fun clearLogs() = prefs.edit().putString("logs", "[]").apply()
     fun clearAlerts() = prefs.edit().putString("alerts", "[]").apply()
+    fun dismissAlert(id: Long) = saveAlerts(alerts().filter { it.id != id })
     fun resetReminders() = saveReminders(reminders().map { it.copy(doneAt = null) })
 
     fun upsertResident(resident: CareResident) {

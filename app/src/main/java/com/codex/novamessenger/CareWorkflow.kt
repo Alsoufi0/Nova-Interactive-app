@@ -2,13 +2,11 @@ package com.codex.novamessenger
 
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import java.util.concurrent.atomic.AtomicBoolean
 
 class CareWorkflow(private val activity: MainActivity) {
 
     fun runRobotCheck() {
-        Log.i("NovaConcierge", "runRobotCheck")
         activity.setStatus("Running Nova check...")
         Thread {
             val targets = activity.robot.getBodyTargets()
