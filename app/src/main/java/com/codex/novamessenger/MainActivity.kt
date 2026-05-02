@@ -253,6 +253,16 @@ class MainActivity : Activity() {
             scaleType = ImageView.ScaleType.CENTER_CROP
             alpha = 0.95f
         }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+
+        val outer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        outer.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(Color.argb(248, 235, 242, 243), 0)
+            setPadding(dp(8), dp(6), dp(8), 0)
+            addView(header())
+            addView(emergencyStopBar())
+        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+
         val scroll = ScrollView(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
             isFillViewport = true
@@ -261,22 +271,21 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(8), dp(6), dp(8), dp(10))
-            background = rounded(Color.argb(218, 239, 244, 244), 0)
+            background = rounded(Color.argb(215, 235, 242, 243), 0)
         }
-        scroll.addView(root)
-        root.addView(header())
-        root.addView(taskProgressStrip())
-        root.addView(emergencyStopBar())
+        if (currentTaskProgress > 0 || safetyStopStatus.contains("Stopped")) root.addView(taskProgressStrip())
         when (currentPage) {
-            "message" -> root.addView(messagePage())
-            "care" -> root.addView(carePage())
+            "message"      -> root.addView(messagePage())
+            "care"         -> root.addView(carePage())
             "destinations" -> root.addView(destinationsPage())
-            "robot" -> root.addView(robotPage())
-            "camera" -> root.addView(cameraPage())
-            else -> root.addView(homePage())
+            "robot"        -> root.addView(robotPage())
+            "camera"       -> root.addView(cameraPage())
+            else           -> root.addView(homePage())
         }
         root.addView(bottomNav())
-        frame.addView(scroll, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        scroll.addView(root)
+        outer.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        frame.addView(outer, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         return frame
     }
 
@@ -1067,9 +1076,9 @@ class MainActivity : Activity() {
 
     internal fun card(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = rounded(Card, dp(8), Color.rgb(220, 229, 230))
-        setPadding(dp(8), dp(6), dp(8), dp(8))
-        layoutParams = full().apply { bottomMargin = dp(6) }
+        background = rounded(Card, dp(14), Color.rgb(210, 222, 224))
+        setPadding(dp(14), dp(12), dp(14), dp(14))
+        layoutParams = full().apply { bottomMargin = dp(8) }
     }
 
     internal fun compactCard(text: String, onClick: () -> Unit): View = TextView(this).apply {
@@ -1124,16 +1133,16 @@ class MainActivity : Activity() {
 
     internal fun actionButton(text: String, color: Int = Primary, onClick: () -> Unit): Button = Button(this).apply {
         this.text = text
-        textSize = 11f
-        minHeight = dp(42)
+        textSize = 13f
+        minHeight = dp(48)
         minWidth = 0
         maxLines = 2
         includeFontPadding = false
         setTextColor(Color.WHITE)
         typeface = Typeface.DEFAULT_BOLD
         setAllCaps(false)
-        background = rounded(color, dp(8))
-        setPadding(dp(8), dp(6), dp(8), dp(6))
+        background = rounded(color, dp(10))
+        setPadding(dp(12), dp(8), dp(12), dp(8))
         setOnClickListener { onClick() }
     }
 

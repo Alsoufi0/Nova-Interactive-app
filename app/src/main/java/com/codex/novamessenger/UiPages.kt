@@ -18,20 +18,46 @@ import java.util.Locale
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 
-internal fun MainActivity.navButton(text: String, page: String) =
-    actionButton(text, if (currentPage == page) Accent else PrimaryDark) {
-        currentPage = page
-        setContentView(buildUi())
+internal fun MainActivity.bottomNav(): View {
+    data class Tab(val label: String, val page: String)
+    val tabs = listOf(
+        Tab("Home", "home"), Tab("Message", "message"), Tab("Care", "care"),
+        Tab("Map", "destinations"), Tab("Robot", "robot"), Tab("Camera", "camera")
+    )
+    return LinearLayout(this@bottomNav).apply {
+        orientation = LinearLayout.HORIZONTAL
+        background = rounded(Color.WHITE, dp(16), Color.rgb(210, 222, 224))
+        setPadding(dp(4), 0, dp(4), 0)
+        layoutParams = full().apply { topMargin = dp(10) }
+        tabs.forEach { tab ->
+            val active = currentPage == tab.page
+            val item = LinearLayout(this@bottomNav).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = android.view.Gravity.CENTER
+                setPadding(dp(4), dp(10), dp(4), dp(10))
+                setOnClickListener { currentPage = tab.page; setContentView(buildUi()) }
+            }
+            if (active) {
+                item.addView(View(this@bottomNav).apply {
+                    background = rounded(Primary, dp(99))
+                    layoutParams = LinearLayout.LayoutParams(dp(28), dp(3)).also { it.bottomMargin = dp(4) }
+                })
+            } else {
+                item.addView(View(this@bottomNav).apply {
+                    layoutParams = LinearLayout.LayoutParams(dp(28), dp(3)).also { it.bottomMargin = dp(4) }
+                })
+            }
+            item.addView(android.widget.TextView(this@bottomNav).apply {
+                text = tab.label
+                textSize = 11f
+                typeface = if (active) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                gravity = android.view.Gravity.CENTER
+                setTextColor(if (active) Primary else Muted)
+            })
+            addView(item, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        }
     }
-
-internal fun MainActivity.bottomNav(): View = buttonRow(
-    navButton("Home", "home"),
-    navButton("Message", "message"),
-    navButton("Care", "care"),
-    navButton("Map", "destinations"),
-    navButton("Robot", "robot"),
-    navButton("Camera", "camera")
-)
+}
 
 // ── Layout helpers ────────────────────────────────────────────────────────────
 
@@ -146,103 +172,156 @@ internal fun MainActivity.taskProgressStrip(): View {
 
 internal fun MainActivity.emergencyStopBar(): View {
     val stopped = safetyStopStatus.contains("Stopped")
-    return LinearLayout(this@emergencyStopBar).apply {
-        orientation = LinearLayout.VERTICAL
-        gravity = Gravity.CENTER
-        background = rounded(if (stopped) Good else Danger, dp(10), 0)
-        minimumHeight = dp(60)
-        setPadding(dp(16), dp(16), dp(16), dp(16))
-        layoutParams = full().apply { bottomMargin = dp(6) }
-        isClickable = true
-        isFocusable = true
-        setOnClickListener {
-            if (stopped) resumeOperations() else stopAll()
-            setContentView(buildUi())
-        }
-        addView(TextView(this@emergencyStopBar).apply {
-            text = if (stopped) "RESUME OPERATIONS" else "EMERGENCY STOP"
-            textSize = 17f
-            typeface = Typeface.DEFAULT_BOLD
+    return if (stopped) {
+        LinearLayout(this@emergencyStopBar).apply {
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            letterSpacing = 0.06f
-        })
+            background = rounded(Danger, dp(10), 0)
+            minimumHeight = dp(52)
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            layoutParams = full().apply { topMargin = dp(4); bottomMargin = dp(4) }
+            isClickable = true; isFocusable = true
+            setOnClickListener { resumeOperations(); setContentView(buildUi()) }
+            addView(android.widget.TextView(this@emergencyStopBar).apply {
+                text = "STOPPED  —  Tap to Resume Operations"
+                textSize = 16f
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                letterSpacing = 0.04f
+                layoutParams = full()
+            })
+        }
+    } else {
+        LinearLayout(this@emergencyStopBar).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = full().apply { topMargin = dp(4); bottomMargin = dp(6) }
+            addView(View(this@emergencyStopBar).apply {
+                layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
+            })
+            addView(android.widget.TextView(this@emergencyStopBar).apply {
+                text = "Emergency Stop"
+                textSize = 12f
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                setTextColor(Danger)
+                background = rounded(Color.rgb(255, 246, 246), dp(8), Danger)
+                setPadding(dp(18), dp(8), dp(18), dp(8))
+                isClickable = true; isFocusable = true
+                setOnClickListener { stopAll(); setContentView(buildUi()) }
+            })
+        }
     }
 }
 
 // ── Pages ─────────────────────────────────────────────────────────────────────
 
 internal fun MainActivity.homePage(): View {
-    val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    root.addView(homeCommandGrid())
-    root.addView(buttonRow(
-        compactStatus("Task", currentTaskStage.ifBlank { "Ready" }),
-        compactStatus("Home Base", vm.homeBase),
-        compactStatus("Map", if (lastMapPoints.isEmpty()) "Load map" else "${lastMapPoints.size} pts")
+    val root = LinearLayout(this@homePage).apply { orientation = LinearLayout.VERTICAL }
+
+    // Greeting
+    root.addView(LinearLayout(this@homePage).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(4), dp(2), dp(4), dp(10))
+        addView(android.widget.TextView(this@homePage).apply {
+            text = "Nova Care Assistant"
+            textSize = 22f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(PrimaryDark)
+        })
+        addView(android.widget.TextView(this@homePage).apply {
+            text = if (robot.isRobotSdkAvailable) "Connected  ·  ${lastBattery.replace("Battery ", "")}"
+                   else "Preview Mode  ·  ${lastMapPoints.size} map points"
+            textSize = 13f
+            setTextColor(Muted)
+            setPadding(0, dp(3), 0, 0)
+        })
+    })
+
+    // Primary feature cards
+    root.addView(twoPane(
+        homeFeatureCard("Message Delivery", "Record, save & deliver\nvisitor messages",
+            repo.pendingCount().let { if (it > 0) "$it in queue" else null }, Accent) {
+            currentPage = "message"; setContentView(buildUi())
+        },
+        homeFeatureCard("Care Rounds", "Resident check-ins,\nmedication & reminders",
+            careRepo.reminders().count { it.doneAt == null }.let { if (it > 0) "$it pending today" else null }, CareBlue) {
+            currentPage = "care"; setContentView(buildUi())
+        }
     ))
-    root.addView(actionButton("Guest Assist", Accent) {
-        guestAssist.startGuestAssist(auto = false)
-    }.apply { layoutParams = full().apply { topMargin = dp(6) } })
+
+    // Guide row
+    root.addView(card().also { c ->
+        c.addView(android.widget.TextView(this@homePage).apply {
+            text = "Guide a Visitor"
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Text)
+        })
+        c.addView(android.widget.TextView(this@homePage).apply {
+            text = "Navigate Nova to any saved destination point"
+            textSize = 12f
+            setTextColor(Muted)
+            setPadding(0, dp(2), 0, dp(10))
+        })
+        c.addView(buttonRow(
+            destinationDropdown().also { pointInput = it },
+            actionButton("Go  →", Primary) { saveSettings(); goToDestination() }
+        ))
+    })
+
+    // Secondary quick actions
+    root.addView(buttonRow(
+        actionButton("Follow", Good) { startFollowMode(); currentPage = "robot"; setContentView(buildUi()) },
+        actionButton("Camera", PrimaryDark) { currentPage = "camera"; setContentView(buildUi()) },
+        actionButton("Alert Staff", Danger) { careWorkflow.createStaffAlert("urgent", destination(), "Assistance requested from Nova.") }
+    ))
     return root
 }
 
-internal fun MainActivity.homeCommandGrid(): View {
-    val grid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    grid.addView(buttonRow(
-        homeCommandTile("Message", "Record and deliver", "M", Accent) {
-            currentPage = "message"
-            setContentView(buildUi())
-        },
-        homeCommandTile("Care", "Rounds and check-ins", "C", CareBlue) {
-            currentPage = "care"
-            setContentView(buildUi())
-        },
-        homeCommandTile("Map", "Destinations and guide", "P", Primary) {
-            currentPage = "destinations"
-            setContentView(buildUi())
-        }
-    ))
-    grid.addView(buttonRow(
-        homeCommandTile("Follow", "Person tracking", "F", Good) {
-            currentPage = "robot"
-            setContentView(buildUi())
-            startFollowMode()
-        },
-        homeCommandTile("Camera", "Detection view", "V", PrimaryDark) {
-            currentPage = "camera"
-            setContentView(buildUi())
-        },
-        homeCommandTile("Alert", "Notify staff", "!", Danger) {
-            careWorkflow.createStaffAlert("urgent", destination(), "Assistance requested from Nova.")
-        }
-    ))
-    return grid
-}
-
-internal fun MainActivity.homeCommandTile(title: String, subtitle: String, code: String, color: Int, onClick: () -> Unit): View {
-    val box = LinearLayout(this).apply {
+internal fun MainActivity.homeFeatureCard(title: String, subtitle: String, badge: String?, color: Int, onClick: () -> Unit): View {
+    val box = LinearLayout(this@homeFeatureCard).apply {
         orientation = LinearLayout.VERTICAL
-        gravity = Gravity.CENTER
-        background = rounded(Color.WHITE, dp(14), Color.rgb(218, 228, 232))
-        setPadding(dp(8), dp(8), dp(8), dp(8))
-        minimumHeight = dp(82)
+        background = rounded(Color.WHITE, dp(16), Color.argb(70, Color.red(color), Color.green(color), Color.blue(color)))
+        setPadding(dp(14), dp(16), dp(14), dp(16))
+        minimumHeight = dp(130)
         setOnClickListener { onClick() }
     }
-    box.addView(circleIcon(code, color, dp(36)))
-    box.addView(TextView(this).apply {
+    box.addView(View(this@homeFeatureCard).apply {
+        background = rounded(color, dp(6))
+        layoutParams = LinearLayout.LayoutParams(dp(32), dp(5)).also { it.bottomMargin = dp(10) }
+    })
+    box.addView(android.widget.TextView(this@homeFeatureCard).apply {
         text = title
-        textSize = 15f
+        textSize = 16f
         typeface = Typeface.DEFAULT_BOLD
-        gravity = Gravity.CENTER
-        setTextColor(Color.rgb(11, 25, 52))
-        setPadding(0, dp(4), 0, 0)
-    }, full())
-    box.addView(TextView(this).apply {
+        setTextColor(PrimaryDark)
+    })
+    box.addView(android.widget.TextView(this@homeFeatureCard).apply {
         text = subtitle
-        textSize = 10f
-        gravity = Gravity.CENTER
+        textSize = 12f
         setTextColor(Muted)
-    }, full())
+        setPadding(0, dp(4), 0, 0)
+    })
+    if (badge != null) {
+        box.addView(android.widget.TextView(this@homeFeatureCard).apply {
+            text = badge
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(color)
+            background = rounded(Color.argb(22, Color.red(color), Color.green(color), Color.blue(color)), dp(6), color)
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            layoutParams = full().apply { topMargin = dp(10) }
+        })
+    }
+    box.addView(android.widget.TextView(this@homeFeatureCard).apply {
+        text = "Open  →"
+        textSize = 11f
+        setTextColor(Color.argb(130, Color.red(color), Color.green(color), Color.blue(color)))
+        gravity = android.view.Gravity.END
+        layoutParams = full().apply { topMargin = dp(8) }
+    })
     return box
 }
 
@@ -1001,24 +1080,24 @@ internal fun MainActivity.settingsPanel(): View {
 
 // ── Common components ─────────────────────────────────────────────────────────
 
-internal fun MainActivity.pageHero(title: String, subtitle: String): View {
-    val box = card()
-    box.background = rounded(Color.rgb(11, 17, 20), dp(8), Color.rgb(57, 78, 82))
-    box.setPadding(dp(8), dp(5), dp(8), dp(6))
-    box.addView(TextView(this).apply {
-        text = title
-        textSize = 13f
-        typeface = Typeface.DEFAULT_BOLD
-        setTextColor(Color.WHITE)
-    })
-    box.addView(TextView(this).apply {
-        text = subtitle
-        textSize = 8f
-        setTextColor(Color.rgb(198, 214, 214))
-        setPadding(0, dp(1), 0, 0)
-    })
-    return box
-}
+internal fun MainActivity.pageHero(title: String, subtitle: String): View =
+    LinearLayout(this@pageHero).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(4), dp(2), dp(4), dp(10))
+        layoutParams = full()
+        addView(android.widget.TextView(this@pageHero).apply {
+            text = title
+            textSize = 22f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(PrimaryDark)
+        })
+        addView(android.widget.TextView(this@pageHero).apply {
+            text = subtitle
+            textSize = 13f
+            setTextColor(Muted)
+            setPadding(0, dp(3), 0, 0)
+        })
+    }
 
 internal fun MainActivity.circleIcon(text: String, color: Int, size: Int): View = TextView(this).apply {
     this.text = text
