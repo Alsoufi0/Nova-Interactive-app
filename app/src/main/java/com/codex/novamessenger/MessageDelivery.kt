@@ -131,15 +131,13 @@ class MessageDelivery(private val activity: MainActivity) {
         val result = activity.robot.startNavigation(message.destination) { status ->
             activity.setStatus(status)
             val lower = status.lowercase()
-            val arrived = listOf("arrive", "complete", "success", "finish", "到达", "完成").any { lower.contains(it) } ||
-                Regex("""navigation result\s+(102|104)\b""").containsMatchIn(lower) ||
-                Regex("""navigation result\s+1\s+true""").containsMatchIn(lower) ||
-                lower.contains("in range") || lower.contains("in_destination")
-            if (arrived && played.compareAndSet(false, true)) {
+            val arrived = activity.careWorkflow.isArrivalStatus(status)
+            val failed = lower.contains("error") || lower.contains("fail")
+            if ((arrived || failed) && played.compareAndSet(false, true)) {
                 activity.runOnUiThread { playDeliveredMessage(message) }
             }
         }
-        if (!result.ok) activity.setStatus(result.message)
+        if (!result.ok && played.compareAndSet(false, true)) playDeliveredMessage(message)
     }
 
     fun refreshMessages() {

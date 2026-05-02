@@ -68,7 +68,6 @@ class VoiceMessageManager(private val activity: Activity) : TextToSpeech.OnInitL
                 override fun onResults(results: Bundle?) {
                     val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     val text = matches?.firstOrNull().orEmpty()
-                    Log.d(TAG, "transcribeOnce result: $text")
                     callback(text)
                     recognizer.destroy()
                     if (speechRecognizer === recognizer) speechRecognizer = null

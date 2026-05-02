@@ -75,7 +75,6 @@ class CloudRelayClient(
                 }
             }
             consecutiveFailures = 0
-            Log.d(TAG, "Cloud sync ok: commands=${commands.length()}")
         }.onFailure {
             consecutiveFailures++
             val backoffMs = minOf(60_000L, 2_000L * (1L shl minOf(consecutiveFailures - 1, 5)))
@@ -91,7 +90,6 @@ class CloudRelayClient(
             val sent = runCatching {
                 postJson("$base/robot/result", JSONObject().put("id", id).put("result", result), token)
                 iterator.remove()
-                Log.d(TAG, "Flushed pending result for command $id")
             }.isSuccess
             if (!sent) break
         }
