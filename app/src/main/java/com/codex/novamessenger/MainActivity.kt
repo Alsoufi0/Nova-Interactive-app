@@ -234,6 +234,8 @@ class MainActivity : Activity() {
         }
         scroll.addView(root)
         root.addView(header())
+        root.addView(taskProgressStrip())
+        root.addView(emergencyStopBar())
         when (currentPage) {
             "message" -> root.addView(messagePage())
             "care" -> root.addView(carePage())
@@ -264,9 +266,19 @@ class MainActivity : Activity() {
         runCatching { robot.stopFollowTarget() }
         activeRoundIds = emptyList()
         activeRoundIndex = -1
-        safetyStopStatus = "Stopped"
-        setTask("Stopped", "Safety stop", "Awaiting operator", 0)
-        setStatus("Stopped movement and navigation.")
+        safetyStopStatus = "Stopped (Safety)"
+        currentTaskTitle = "Stopped"
+        currentTaskStage = "Safety stop"
+        currentTaskProgress = 0
+        setStatus("Stopped (Safety) — all movement halted.")
+    }
+
+    internal fun resumeOperations() {
+        safetyStopStatus = ""
+        currentTaskTitle = "Nova Care Assistant"
+        currentTaskStage = "Ready"
+        currentTaskProgress = 0
+        setStatus("Operations resumed. Ready for commands.")
     }
 
     internal fun loadMapPoints(silent: Boolean = false) {

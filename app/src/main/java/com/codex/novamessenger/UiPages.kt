@@ -67,20 +67,122 @@ internal fun MainActivity.compactStatus(title: String, value: String): View {
     return box
 }
 
+// ── Global status strips ──────────────────────────────────────────────────────
+
+internal fun MainActivity.taskProgressStrip(): View {
+    val stopped = safetyStopStatus.contains("Stopped")
+    val hasTask = currentTaskProgress > 0 && !stopped
+
+    val bg = when {
+        stopped -> Color.rgb(255, 232, 232)
+        hasTask -> Color.rgb(240, 248, 255)
+        else    -> Color.rgb(246, 248, 250)
+    }
+    val border = when { stopped -> Danger; hasTask -> Primary; else -> Stroke }
+
+    val box = LinearLayout(this@taskProgressStrip).apply {
+        orientation = LinearLayout.VERTICAL
+        background = rounded(bg, dp(10), border)
+        setPadding(dp(12), dp(9), dp(12), dp(9))
+        layoutParams = full().apply { bottomMargin = dp(3) }
+    }
+
+    if (stopped) {
+        box.addView(TextView(this@taskProgressStrip).apply {
+            text = "Stopped (Safety) — All movement halted"
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setTextColor(Danger)
+            layoutParams = full()
+        })
+        return box
+    }
+
+    val titleRow = LinearLayout(this@taskProgressStrip).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+    }
+    titleRow.addView(TextView(this@taskProgressStrip).apply {
+        text = if (hasTask) currentTaskTitle.ifBlank { "Task in progress" } else "Ready"
+        textSize = 13f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(if (hasTask) Text else Muted)
+        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+    })
+    titleRow.addView(TextView(this@taskProgressStrip).apply {
+        text = if (hasTask) "${currentTaskProgress}%" else "Standby"
+        textSize = 13f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(if (hasTask) Primary else Muted)
+    })
+    box.addView(titleRow, full())
+
+    if (hasTask && currentTaskStage.isNotBlank()) {
+        box.addView(TextView(this@taskProgressStrip).apply {
+            text = currentTaskStage
+            textSize = 11f
+            setTextColor(Muted)
+            setPadding(0, dp(2), 0, dp(4))
+        })
+    }
+
+    val prog = currentTaskProgress.coerceIn(0, 100)
+    val barRow = LinearLayout(this@taskProgressStrip).apply {
+        orientation = LinearLayout.HORIZONTAL
+        background = rounded(Color.rgb(218, 232, 242), dp(4), 0)
+        layoutParams = full().apply { height = dp(7); topMargin = dp(3) }
+    }
+    if (prog > 0) barRow.addView(View(this@taskProgressStrip).apply {
+        background = rounded(Primary, dp(4), 0)
+        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, prog.toFloat())
+    })
+    if (prog < 100) barRow.addView(View(this@taskProgressStrip).apply {
+        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, (100 - prog).toFloat())
+    })
+    box.addView(barRow)
+    return box
+}
+
+internal fun MainActivity.emergencyStopBar(): View {
+    val stopped = safetyStopStatus.contains("Stopped")
+    return LinearLayout(this@emergencyStopBar).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER
+        background = rounded(if (stopped) Good else Danger, dp(10), 0)
+        minimumHeight = dp(60)
+        setPadding(dp(16), dp(16), dp(16), dp(16))
+        layoutParams = full().apply { bottomMargin = dp(6) }
+        isClickable = true
+        isFocusable = true
+        setOnClickListener {
+            if (stopped) resumeOperations() else stopAll()
+            setContentView(buildUi())
+        }
+        addView(TextView(this@emergencyStopBar).apply {
+            text = if (stopped) "RESUME OPERATIONS" else "EMERGENCY STOP"
+            textSize = 17f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            letterSpacing = 0.06f
+        })
+    }
+}
+
 // ── Pages ─────────────────────────────────────────────────────────────────────
 
 internal fun MainActivity.homePage(): View {
     val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     root.addView(homeCommandGrid())
     root.addView(buttonRow(
-        compactStatus("Task", currentTaskStage),
+        compactStatus("Task", currentTaskStage.ifBlank { "Ready" }),
         compactStatus("Home Base", vm.homeBase),
         compactStatus("Map", if (lastMapPoints.isEmpty()) "Load map" else "${lastMapPoints.size} pts")
     ))
-    root.addView(buttonRow(
-        actionButton("Stop Task", Danger) { stopAll() },
-        actionButton("Guest Assist", Accent) { guestAssist.startGuestAssist(auto = false) }
-    ))
+    root.addView(actionButton("Guest Assist", Accent) {
+        guestAssist.startGuestAssist(auto = false)
+    }.apply { layoutParams = full().apply { topMargin = dp(6) } })
     return root
 }
 
