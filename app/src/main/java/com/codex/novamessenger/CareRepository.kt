@@ -134,6 +134,17 @@ class CareRepository(context: Context) {
         return alert
     }
 
+    fun upsertResident(resident: CareResident) {
+        val list = residents().toMutableList()
+        val idx = list.indexOfFirst { it.id == resident.id }
+        if (idx >= 0) list[idx] = resident else list.add(resident)
+        saveResidents(list)
+    }
+
+    fun deleteResident(id: String) {
+        saveResidents(residents().filter { it.id != id })
+    }
+
     fun completeReminder(reminderId: String) {
         saveReminders(reminders().map {
             if (it.id == reminderId) it.copy(doneAt = System.currentTimeMillis()) else it

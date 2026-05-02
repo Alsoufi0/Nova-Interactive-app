@@ -37,9 +37,10 @@ class CareWorkflow(private val activity: MainActivity) {
 
     fun runResidentCheckIn(residentId: String?, continueRound: Boolean = false) {
         val resident = activity.careRepo.resident(residentId) ?: return activity.setStatus("Resident not found.")
-        activity.runOnUiThread { activity.setDestinationText(resolveMapPoint(resident.mapPoint)) }
+        val dest = resolveMapPoint(resident.mapPoint)
+        activity.runOnUiThread { activity.setDestinationText(dest) }
         activity.setTask("Checking ${resident.name}", "Navigating", "Speak check-in prompt", if (continueRound) 38 else 45)
-        activity.careRepo.log("check_in", "Check-in started", "Going to ${resident.name} at ${resident.room}.", resident.id, resident.mapPoint)
+        activity.careRepo.log("check_in", "Check-in started", "Going to ${resident.name} at ${resident.room}.", resident.id, dest)
         activity.follow.stop()
         activity.setStatus("Going to ${resident.name} for check-in...")
         val handled = AtomicBoolean(false)
@@ -48,17 +49,18 @@ class CareWorkflow(private val activity: MainActivity) {
             activity.runOnUiThread {
                 activity.setTask("Checking ${resident.name}", "Speaking", "Listening for response", 85)
                 activity.speakReply(resident.checkInPrompt)
-                activity.careRepo.log("check_in", "Check-in delivered", resident.checkInPrompt, resident.id, resident.mapPoint)
+                activity.careRepo.log("check_in", "Check-in delivered", resident.checkInPrompt, resident.id, dest)
                 if (continueRound) {
                     activity.setTask("Round response window", "Listening", "Continue to next resident", 88)
                     scheduleNextRoundStop(resident)
                 } else {
                     activity.setTask("Check-in completed", "Completed", resident.room, 100)
+                    activity.handleAfterMission("Check-in for ${resident.name}")
                 }
                 if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
             }
         }
-        val result = activity.robot.startNavigation(activity.destination()) { status ->
+        val result = activity.robot.startNavigation(dest) { status ->
             activity.setStatus(status)
             val lower = status.lowercase()
             when {
@@ -73,15 +75,15 @@ class CareWorkflow(private val activity: MainActivity) {
     fun scheduleNextRoundStop(resident: CareResident) {
         val current = activity.activeRoundIds.indexOf(resident.id).takeIf { it >= 0 } ?: activity.activeRoundIndex
         activity.activeRoundIndex = current
-        activity.setStatus("Waiting for ${resident.name}'s response before continuing the round.")
+        val waitMs = (activity.vm.roundWaitSeconds * 1_000L).coerceAtLeast(6_000L)
+        val promptMs = (activity.vm.roundPromptSeconds * 1_000L).coerceIn(3_000L, waitMs - 2_000L)
+        activity.setStatus("Waiting ${activity.vm.roundWaitSeconds}s for ${resident.name}'s response.")
         val mainHandler = Handler(Looper.getMainLooper())
-        // Ask once more after 12 seconds if still waiting
         mainHandler.postDelayed({
             if (activity.activeRoundIds.isEmpty() || activity.activeRoundIndex != current) return@postDelayed
             activity.speakReply("Is there anything else you need before I continue?")
             activity.setStatus("Checking if ${resident.name} needs anything else...")
-        }, 12_000)
-        // Move on after 22 seconds total
+        }, promptMs)
         mainHandler.postDelayed({
             if (activity.activeRoundIds.isEmpty() || activity.activeRoundIndex != current) return@postDelayed
             activity.careRepo.log("check_in", "Response window completed", "Nova waited for ${resident.name}'s response.", resident.id, resident.mapPoint)
@@ -92,6 +94,7 @@ class CareWorkflow(private val activity: MainActivity) {
                 activity.setTask("Care round completed", "Completed", "All residents checked", 100)
                 activity.careRepo.log("round", "Care round completed", "All queued residents checked.", resident.id, resident.mapPoint)
                 activity.speakReply("Care round completed. All residents have been checked. Have a wonderful day.")
+                activity.handleAfterMission("Care round")
                 if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
             } else {
                 activity.activeRoundIndex = nextIndex
@@ -103,21 +106,21 @@ class CareWorkflow(private val activity: MainActivity) {
                     runResidentCheckIn(next.id, continueRound = true)
                 }
             }
-        }, 22_000)
+        }, waitMs)
     }
 
     fun runExternalResidentCheckIn(residentId: String, name: String, room: String, mapPoint: String, notes: String) {
-        val destinationPoint = resolveMapPoint(mapPoint.ifBlank { room.ifBlank { activity.destination() } })
+        val dest = resolveMapPoint(mapPoint.ifBlank { room.ifBlank { activity.destination() } })
         val displayName = name.ifBlank { "the resident" }
-        val displayRoom = room.ifBlank { destinationPoint }
+        val displayRoom = room.ifBlank { dest }
         val prompt = buildString {
             append("Hello $displayName. This is Nova checking in at $displayRoom. ")
             append("Do you need water, medication help, or staff assistance?")
             if (notes.isNotBlank()) append(" Care note: $notes")
         }
-        activity.runOnUiThread { activity.setDestinationText(destinationPoint) }
+        activity.runOnUiThread { activity.setDestinationText(dest) }
         activity.setTask("Checking $displayName", "Navigating", "Speak check-in prompt", 45)
-        activity.careRepo.log("check_in", "Cloud resident check-in", "Going to $displayName at $displayRoom.", residentId.ifBlank { null }, destinationPoint)
+        activity.careRepo.log("check_in", "Cloud resident check-in", "Going to $displayName at $displayRoom.", residentId.ifBlank { null }, dest)
         activity.follow.stop()
         activity.setStatus("Going to $displayName for cloud check-in...")
         val handled = AtomicBoolean(false)
@@ -126,12 +129,13 @@ class CareWorkflow(private val activity: MainActivity) {
             activity.runOnUiThread {
                 activity.setTask("Checking $displayName", "Speaking", "Complete care log", 85)
                 activity.speakReply(prompt)
-                activity.careRepo.log("check_in", "Cloud check-in delivered", prompt, residentId.ifBlank { null }, destinationPoint)
+                activity.careRepo.log("check_in", "Cloud check-in delivered", prompt, residentId.ifBlank { null }, dest)
                 activity.setTask("Check-in completed", "Completed", displayRoom, 100)
+                activity.handleAfterMission("Check-in for $displayName")
                 if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
             }
         }
-        val result = activity.robot.startNavigation(activity.destination()) { status ->
+        val result = activity.robot.startNavigation(dest) { status ->
             activity.setStatus(status)
             val lower = status.lowercase()
             when {
@@ -160,9 +164,10 @@ class CareWorkflow(private val activity: MainActivity) {
         val reminder = activity.careRepo.reminders().firstOrNull { it.id == reminderId }
             ?: return activity.setStatus("Reminder not found.")
         val resident = activity.careRepo.resident(reminder.residentId)
-        activity.runOnUiThread { activity.setDestinationText(resolveMapPoint(resident?.mapPoint ?: activity.destination())) }
+        val dest = resolveMapPoint(resident?.mapPoint ?: activity.destination())
+        activity.runOnUiThread { activity.setDestinationText(dest) }
         activity.setTask("Medication reminder", "Navigating", "Speak reminder", 45)
-        activity.careRepo.log("reminder", reminder.title, "Going to ${resident?.name ?: "resident"} for ${reminder.timeLabel}.", reminder.residentId, activity.destination())
+        activity.careRepo.log("reminder", reminder.title, "Going to ${resident?.name ?: "resident"} for ${reminder.timeLabel}.", reminder.residentId, dest)
         activity.follow.stop()
         activity.setStatus("Taking reminder to ${resident?.name ?: "resident"}...")
         val handled = AtomicBoolean(false)
@@ -172,12 +177,13 @@ class CareWorkflow(private val activity: MainActivity) {
                 activity.setTask("Medication reminder", "Speaking", "Mark complete", 85)
                 activity.speakReply(reminder.message)
                 activity.careRepo.completeReminder(reminder.id)
-                activity.careRepo.log("reminder", "Reminder delivered", reminder.message, reminder.residentId, activity.destination())
-                activity.setTask("Reminder completed", "Completed", resident?.room ?: activity.destination(), 100)
+                activity.careRepo.log("reminder", "Reminder delivered", reminder.message, reminder.residentId, dest)
+                activity.setTask("Reminder completed", "Completed", resident?.room ?: dest, 100)
+                activity.handleAfterMission("Medication reminder")
                 if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
             }
         }
-        val result = activity.robot.startNavigation(activity.destination()) { status ->
+        val result = activity.robot.startNavigation(dest) { status ->
             activity.setStatus(status)
             val lower = status.lowercase()
             when {
@@ -190,20 +196,81 @@ class CareWorkflow(private val activity: MainActivity) {
     }
 
     fun createStaffAlert(priority: String, room: String, message: String) {
-        val alert = activity.careRepo.createAlert(priority, room.ifBlank { activity.destination() }, message)
-        activity.setTask("Staff alert", "Waiting for staff", alert.room, 80)
-        activity.speakReply("I alerted staff. Please wait here while help is requested.")
-        activity.setStatus("Staff alert ${alert.priority}: ${alert.message}")
+        val resolvedRoom = room.ifBlank { activity.destination() }
+        val alert = activity.careRepo.createAlert(priority, resolvedRoom, message)
+        val speakMessage = alert.message
+
+        if (room.isNotBlank()) {
+            val destinationPoint = resolveMapPoint(resolvedRoom)
+            activity.setDestinationText(destinationPoint)
+            activity.follow.stop()
+            activity.setTask("Staff alert", "Navigating", "Speak alert at $resolvedRoom", 55)
+            activity.setStatus("Alert: navigating to $resolvedRoom...")
+            val handled = AtomicBoolean(false)
+            fun onArrival() {
+                if (!handled.compareAndSet(false, true)) return
+                activity.runOnUiThread {
+                    activity.setTask("Staff alert", "Speaking", "Waiting for staff", 85)
+                    activity.speakReply(speakMessage)
+                    activity.setTask("Staff alert delivered", "Waiting for staff", resolvedRoom, 100)
+                    if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
+                }
+            }
+            val result = activity.robot.startNavigation(destinationPoint) { status ->
+                activity.setStatus(status)
+                val lower = status.lowercase()
+                when {
+                    isArrivalStatus(status) -> onArrival()
+                    lower.contains("error") || lower.contains("fail") -> onArrival()
+                }
+            }
+            if (!result.ok) {
+                activity.speakReply(speakMessage)
+                activity.setTask("Staff alert", "Waiting for staff", resolvedRoom, 80)
+                activity.setStatus("Staff alert ${alert.priority}: ${alert.message}")
+            }
+        } else {
+            activity.setTask("Staff alert", "Waiting for staff", resolvedRoom, 80)
+            activity.speakReply(speakMessage)
+            activity.setStatus("Staff alert ${alert.priority}: ${alert.message}")
+        }
         if (activity.currentPage == "care") activity.runOnUiThread { activity.setContentView(activity.buildUi()) }
     }
 
     fun runVisitorGuide(destinationName: String) {
         val target = destinationName.ifBlank { activity.destination() }
         activity.setDestinationText(resolveMapPoint(target))
-        activity.setTask("Visitor guide", "Navigating", "Arrive at ${activity.destination()}", 45)
-        activity.careRepo.log("visitor", "Visitor guide", "Guiding visitor to ${activity.destination()}.", null, activity.destination())
-        activity.speakReply("I can guide you to ${activity.destination()}. Please follow me.")
-        activity.goToDestination()
+        val dest = activity.destination()
+        activity.setTask("Visitor guide", "Navigating", "Arrive at $dest", 45)
+        activity.careRepo.log("visitor", "Visitor guide", "Guiding visitor to $dest.", null, dest)
+        activity.speakReply("I can guide you to $dest. Please follow me.")
+        activity.follow.stop()
+        val handled = AtomicBoolean(false)
+        val result = activity.robot.startNavigation(dest) { status ->
+            activity.setStatus(status)
+            val lower = status.lowercase()
+            when {
+                isArrivalStatus(status) -> {
+                    if (!handled.compareAndSet(false, true)) return@startNavigation
+                    activity.runOnUiThread {
+                        activity.setTask("Visitor guide", "Arrived", dest, 90)
+                        activity.speakReply("We have arrived at $dest. Have a great day.")
+                        activity.handleAfterMission("Visitor guide")
+                    }
+                }
+                lower.contains("error") || lower.contains("fail") -> {
+                    if (!handled.compareAndSet(false, true)) return@startNavigation
+                    activity.runOnUiThread {
+                        activity.speakReply("I was unable to navigate to $dest. I apologize for the inconvenience.")
+                        activity.handleAfterMission("Visitor guide")
+                    }
+                }
+            }
+        }
+        if (!result.ok) {
+            activity.speakReply("Navigation is not available. $dest is this way.")
+            activity.handleAfterMission("Visitor guide")
+        }
     }
 
     fun resolveMapPoint(preferred: String): String {

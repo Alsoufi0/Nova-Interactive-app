@@ -1,5 +1,7 @@
 package com.codex.novamessenger
 
+import java.util.concurrent.atomic.AtomicBoolean
+
 class MessageDelivery(private val activity: MainActivity) {
 
     fun template(text: String) {
@@ -125,21 +127,16 @@ class MessageDelivery(private val activity: MainActivity) {
         activity.follow.stop()
         activity.setTask("Delivering message", "Navigating", "Play message from visitor", 55)
         activity.setStatus("Taking message to ${message.destination}...")
-        var played = false
+        val played = AtomicBoolean(false)
         val result = activity.robot.startNavigation(message.destination) { status ->
             activity.setStatus(status)
             val lower = status.lowercase()
-            if (listOf("arrive", "complete", "success", "finish", "到达", "完成").any { lower.contains(it) }) {
-                if (!played) {
-                    played = true
-                    playDeliveredMessage(message)
-                }
-            }
-            if (!played && (Regex("""navigation result\s+(102|104)\b""").containsMatchIn(lower) ||
-                    Regex("""navigation result\s+1\s+true""").containsMatchIn(lower) ||
-                    lower.contains("in range") || lower.contains("in_destination"))) {
-                played = true
-                playDeliveredMessage(message)
+            val arrived = listOf("arrive", "complete", "success", "finish", "到达", "完成").any { lower.contains(it) } ||
+                Regex("""navigation result\s+(102|104)\b""").containsMatchIn(lower) ||
+                Regex("""navigation result\s+1\s+true""").containsMatchIn(lower) ||
+                lower.contains("in range") || lower.contains("in_destination")
+            if (arrived && played.compareAndSet(false, true)) {
+                activity.runOnUiThread { playDeliveredMessage(message) }
             }
         }
         if (!result.ok) activity.setStatus(result.message)
@@ -212,6 +209,7 @@ class MessageDelivery(private val activity: MainActivity) {
             refreshMessages()
             activity.setTask("Message delivered", "Completed", message.destination, 100)
             activity.setStatus("Delivered message at ${message.destination}.")
+            activity.handleAfterMission("Message delivery")
         } else activity.setStatus("Could not play the saved message.")
     }
 

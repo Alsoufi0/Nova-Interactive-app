@@ -110,7 +110,9 @@ class NovaConciergeApplication : Application() {
             val message = params?.getString("message").orEmpty().ifBlank { "staff assistance requested" }
             val room = params?.getString("room").orEmpty()
             val priority = params?.getString("priority").orEmpty()
-            listOf("alert staff", priority, room, message).filter { it.isNotBlank() }.joinToString(" ")
+            // Only include priority keyword if it signals urgency — "normal" adds nothing and confuses intent detection
+            val priorityWord = if (priority == "urgent") "urgent" else ""
+            listOf("alert staff", priorityWord, room, message).filter { it.isNotBlank() }.joinToString(" ")
         }
 
     private fun visitorGuideAction(): Action =

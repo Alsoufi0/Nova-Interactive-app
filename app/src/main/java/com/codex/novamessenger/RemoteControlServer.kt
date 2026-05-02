@@ -142,6 +142,7 @@ class RemoteControlServer(
         200 -> "OK"
         401 -> "Unauthorized"
         404 -> "Not Found"
+        429 -> "Too Many Requests"
         503 -> "Service Unavailable"
         else -> "OK"
     }
@@ -172,7 +173,7 @@ class RemoteControlServer(
         <body><main>
           <div class="top"><h1>Nova Control</h1><p class="sub">Private operator console for concierge, follow, map delivery, and detection.</p></div>
           <div class="hero">
-            <div class="panel"><div class="title">Live Status</div><div id="summary" class="status"></div></div>
+            <div class="panel"><div class="title">Live Status</div><div id="summary" class="status"></div><div id="taskBar" style="margin-top:10px"></div></div>
             <div class="panel"><div class="title">Emergency</div><button class="stop" onclick="cmd('stop')">Stop Nova</button><p class="muted">Stops follow, navigation, and chassis movement.</p></div>
           </div>
           <div class="grid">
@@ -184,21 +185,30 @@ class RemoteControlServer(
             <div class="panel"><div class="title">Navigation</div>
               <input id="dest" placeholder="Destination, e.g. Reception">
               <button onclick="cmd('guide','dest')">Guide</button>
-              <button class="ghost" onclick="cmd('charge')">Charge</button>
+              <button class="ghost" onclick="cmd('return_home')">Return to Home Base</button>
+              <button class="ghost" onclick="cmd('charge')">Return to Charge</button>
               <div id="pointChips" class="chips"></div>
             </div>
             <div class="panel"><div class="title">Message Delivery</div>
               <input id="msgDest" placeholder="Destination">
               <input id="msg" placeholder="Message content">
               <button onclick="sendMessage()">Send Message</button>
-              <p class="muted">Nova navigates to the saved map point and speaks the message as coming from the phone operator.</p>
+              <p class="muted">Nova navigates to the saved map point and speaks the message.</p>
+            </div>
+            <div class="panel"><div class="title">Care Rounds</div>
+              <button onclick="cmd('start_rounds')">Start Care Round</button>
+              <input id="alertRoom" placeholder="Room (e.g. Room 204)">
+              <input id="alertMsg" placeholder="Alert message">
+              <button class="stop" onclick="sendAlert('urgent')">Urgent Alert</button>
+              <button class="ghost" onclick="sendAlert('normal')">Normal Alert</button>
+              <p class="muted">Alert navigates Nova to the room and speaks the message on arrival.</p>
             </div>
             <div class="panel"><div class="title">Detection Watch</div>
               <button class="blue" onclick="cmd('camera_start')">Open Camera Feed</button>
               <button onclick="cmd('security_start')">Start Watch</button>
               <button class="ghost" onclick="cmd('security_stop')">Stop Watch</button>
               <button class="ghost" onclick="cmd('camera_stop')">Close Camera</button>
-              <p class="muted">Use Detection Watch for RobotAPI person scanning. Use Camera Feed for live snapshots.</p>
+              <p class="muted">Use Detection Watch for RobotAPI person scanning. Camera Feed for live snapshots.</p>
             </div>
           </div>
           <div class="panel camera"><div class="title">Live Camera</div><img id="camera" alt="Nova camera feed"><p id="cameraNote" class="muted">Press Open Camera Feed to start.</p></div>
@@ -210,13 +220,16 @@ class RemoteControlServer(
         <script>
           async function get(path){return (await fetch(path)).json()}
           async function cmd(action,inputId){let q='?action='+encodeURIComponent(action); if(inputId){q+='&destination='+encodeURIComponent(document.getElementById(inputId).value)} await get('/control'+q); refresh()}
-          async function sendMessage(){await get('/control?action=message&destination='+encodeURIComponent(msgDest.value)+'&message='+encodeURIComponent(msg.value)); refresh()}
+          async function sendMessage(){await get('/control?action=message&destination='+encodeURIComponent(msgDest.value)+'&message='+encodeURIComponent(msg.value)+'&sender=operator'); refresh()}
+          async function sendAlert(priority){await get('/control?action=staff_alert&priority='+encodeURIComponent(priority)+'&room='+encodeURIComponent(alertRoom.value)+'&message='+encodeURIComponent(alertMsg.value)); refresh()}
           function htmlEscape(value){return String(value ?? '').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
           function jsEscape(value){return String(value ?? '').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,' ')}
           function metric(name,value){return '<div class="metric"><b>'+htmlEscape(name)+'</b><span>'+htmlEscape(value)+'</span></div>'}
-          function choosePoint(name){dest.value=name;msgDest.value=name}
+          function bar(pct){return '<div style="margin:6px 0 2px;height:6px;border-radius:99px;background:#1e2d30"><div style="height:6px;border-radius:99px;background:var(--accent);width:'+Math.min(100,pct)+'%"></div></div>'}
+          function choosePoint(name){dest.value=name;msgDest.value=name;alertRoom.value=name}
           async function refresh(){const s=await get('/status'), pe=await get('/people'), po=await get('/points'), de=await get('/detection');
-            summary.innerHTML=metric('Robot',s.status)+metric('Battery',s.battery)+metric('Destination',s.destination||'Not set')+metric('Security',s.security?'On':'Off');
+            summary.innerHTML=metric('Robot',s.status)+metric('Battery',s.battery)+metric('Destination',s.destination||'Not set')+metric('Security',s.security?'On':'Off')+metric('Task',s.taskTitle||'Ready')+metric('Stage',s.taskStage||'--');
+            taskBar.innerHTML='<span style="font-size:13px;color:var(--muted)">'+htmlEscape((s.taskTitle||'Nova Care Assistant')+' · '+htmlEscape(s.taskStage||'Ready'))+'</span>'+bar(s.taskProgress||0)+'<span style="font-size:11px;color:var(--muted)">Safety: '+htmlEscape(s.safetyStop||'--')+'</span>';
             people.textContent=pe.length?JSON.stringify(pe,null,2):'No people detected right now.';
             detection.textContent=JSON.stringify(de,null,2);
             cameraNote.textContent=de.cameraPreview?'Live snapshot feed is refreshing.':'Camera feed is closed or waiting for permission.';
@@ -229,7 +242,7 @@ class RemoteControlServer(
     """.trimIndent()
 
     private fun RemoteStatus.toJson(): String =
-        """{"status":"${esc(status)}","battery":"${esc(battery)}","destination":"${esc(destination)}","points":$points,"queue":$queue,"security":$security,"url":"${esc(url)}"}"""
+        """{"status":"${esc(status)}","battery":"${esc(battery)}","destination":"${esc(destination)}","points":$points,"queue":$queue,"security":$security,"url":"${esc(url)}","taskTitle":"${esc(taskTitle)}","taskStage":"${esc(taskStage)}","taskProgress":$taskProgress,"safetyStop":"${esc(safetyStop)}"}"""
 
     private fun DetectionStatus.toJson(): String =
         """{"cameraPermission":$cameraPermission,"cameraPreview":$cameraPreview,"securityWatch":$securityWatch,"events":$events,"people":$people,"note":"${esc(note)}"}"""
@@ -254,7 +267,11 @@ class RemoteControlServer(
         val points: Int,
         val queue: Int,
         val security: Boolean,
-        val url: String
+        val url: String,
+        val taskTitle: String,
+        val taskStage: String,
+        val taskProgress: Int,
+        val safetyStop: String
     )
 
     data class DetectionStatus(

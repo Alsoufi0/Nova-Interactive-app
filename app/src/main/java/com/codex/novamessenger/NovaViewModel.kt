@@ -25,6 +25,15 @@ class NovaViewModel {
     var activeRoundIndex = -1
     var voiceListening = false
 
+    // Operator-configurable timing settings
+    @Volatile var roundWaitSeconds = 22
+    @Volatile var roundPromptSeconds = 12
+    @Volatile var securityCooldownSeconds = 30
+    @Volatile var guestCooldownSeconds = 45
+    var returnToChargeAfterRound = false
+    @Volatile var homeBase = "Reception"
+    var afterMissionBehavior = "home_base"  // "home_base" | "stay" | "charge" | "ask"
+
     fun setTask(title: String, stage: String, next: String, progress: Int) {
         currentTaskTitle = title
         currentTaskStage = stage

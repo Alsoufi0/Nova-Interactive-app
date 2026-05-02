@@ -41,7 +41,7 @@ class GuestAssist(private val activity: MainActivity) {
         }
         activity.assistBadge.text = "${"%.1f".format(target.distanceMeters)}m guest"
         val now = System.currentTimeMillis()
-        if (now - activity.lastGuestGreetingAt > 45_000L && target.distanceMeters in 0.8..3.0) {
+        if (now - activity.lastGuestGreetingAt > activity.vm.guestCooldownSeconds * 1_000L && target.distanceMeters in 0.8..3.0) {
             activity.lastGuestGreetingAt = now
             val greeting = "Hello. I can take a message, guide you to ${activity.destination()}, or follow you. What would you like?"
             activity.robot.speak(greeting).takeIf { it.ok } ?: activity.voice.speak(greeting)

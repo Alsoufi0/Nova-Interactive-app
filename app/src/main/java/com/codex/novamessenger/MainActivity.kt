@@ -8,7 +8,9 @@ import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.DashPathEffect
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -133,6 +135,13 @@ class MainActivity : Activity() {
         repairCloudSettings()
         clientName = prefs.getString("client", "") ?: ""
         selectedDestination = prefs.getString("destination", "Reception") ?: "Reception"
+        vm.roundWaitSeconds = prefs.getInt("round_wait_seconds", 22)
+        vm.roundPromptSeconds = prefs.getInt("round_prompt_seconds", 12)
+        vm.securityCooldownSeconds = prefs.getInt("security_cooldown_seconds", 30)
+        vm.guestCooldownSeconds = prefs.getInt("guest_cooldown_seconds", 45)
+        vm.returnToChargeAfterRound = prefs.getBoolean("return_to_charge_after_round", false)
+        vm.homeBase = prefs.getString("home_base", "Reception") ?: "Reception"
+        vm.afterMissionBehavior = prefs.getString("after_mission_behavior", "home_base") ?: "home_base"
         robot = DirectNovaRobotAdapter(this)
         cameraFeed = CameraFeedManager(this)
         voice = VoiceMessageManager(this)
@@ -522,7 +531,7 @@ class MainActivity : Activity() {
         val status = "Security watch: ${targets.size} person shape${if (targets.size == 1) "" else "s"} detected${nearest?.let { ", nearest ${"%.1f".format(it.distanceMeters)}m" } ?: ""}."
         setStatus(status)
         val now = System.currentTimeMillis()
-        if (now - lastSecurityAlertAt > 30_000L) {
+        if (now - lastSecurityAlertAt > vm.securityCooldownSeconds * 1_000L) {
             lastSecurityAlertAt = now
             val spoken = robot.speak("Person detected.")
             if (!spoken.ok) voice.speak("Person detected.")
@@ -554,7 +563,11 @@ class MainActivity : Activity() {
             points = lastMapPoints.size,
             queue = repo.pendingCount(),
             security = securityEnabled,
-            url = "http://${localIpAddress()}:8787"
+            url = "http://${localIpAddress()}:8787",
+            taskTitle = currentTaskTitle,
+            taskStage = currentTaskStage,
+            taskProgress = currentTaskProgress,
+            safetyStop = safetyStopStatus
         )
 
     private fun remoteDetectionStatus(): RemoteControlServer.DetectionStatus {
@@ -596,6 +609,8 @@ class MainActivity : Activity() {
             .put("taskProgress", currentTaskProgress)
             .put("safetyStop", safetyStopStatus)
             .put("lastDetectedPerson", lastDetectedPerson)
+            .put("homeBase", vm.homeBase)
+            .put("afterMissionBehavior", vm.afterMissionBehavior)
         robot.getRobotPose()?.let {
             status.put(
                 "robotPose",
@@ -634,10 +649,13 @@ class MainActivity : Activity() {
                 }
                 "camera_stop" -> stopCameraFeed()
                 "guide" -> {
-                    command.params["destination"]?.takeIf { it.isNotBlank() }?.let { setDestinationText(it) }
+                    val dest = command.params["destination"]?.takeIf { it.isNotBlank() }
+                        ?.let { careWorkflow.resolveMapPoint(it) }
+                    if (dest != null) setDestinationText(dest)
                     goToDestination()
                 }
                 "charge" -> setStatus(robot.goCharge().message)
+                "return_home" -> returnToHomeBase()
                 "security_start" -> startSecurityWatch()
                 "security_stop" -> stopSecurityWatch()
                 "message" -> messageDelivery.handleVoiceSendAction(
@@ -681,10 +699,83 @@ class MainActivity : Activity() {
                     command.params["room"].orEmpty(),
                     command.params["message"].orEmpty()
                 )
+                "update_settings" -> {
+                    command.params["round_wait_seconds"]?.toIntOrNull()?.coerceIn(5, 120)?.let { vm.roundWaitSeconds = it }
+                    command.params["round_prompt_seconds"]?.toIntOrNull()?.coerceIn(3, 60)?.let { vm.roundPromptSeconds = it }
+                    command.params["security_cooldown_seconds"]?.toIntOrNull()?.coerceIn(5, 300)?.let { vm.securityCooldownSeconds = it }
+                    command.params["guest_cooldown_seconds"]?.toIntOrNull()?.coerceIn(10, 300)?.let { vm.guestCooldownSeconds = it }
+                    command.params["return_to_charge_after_round"]?.let { vm.returnToChargeAfterRound = it == "true" }
+                    command.params["home_base"]?.takeIf { it.isNotBlank() }?.let { vm.homeBase = careWorkflow.resolveMapPoint(it) }
+                    command.params["after_mission_behavior"]?.takeIf { it in listOf("home_base", "stay", "charge", "ask") }?.let { vm.afterMissionBehavior = it }
+                    saveTimingSettings()
+                    saveHomeBaseSettings()
+                    setStatus("Settings updated from cloud: wait=${vm.roundWaitSeconds}s prompt=${vm.roundPromptSeconds}s sec=${vm.securityCooldownSeconds}s guest=${vm.guestCooldownSeconds}s charge=${vm.returnToChargeAfterRound}")
+                }
                 else -> setStatus("Unknown phone command: ${command.action}")
             }
         }
         return "Command sent: ${command.action}"
+    }
+
+    internal fun cloudUrl(): String =
+        prefs.getString("cloud_url", DEFAULT_CLOUD_URL) ?: DEFAULT_CLOUD_URL
+
+    internal fun cloudToken(): String =
+        prefs.getString("cloud_token", DEFAULT_ROBOT_TOKEN) ?: DEFAULT_ROBOT_TOKEN
+
+    internal fun saveTimingSettings() {
+        prefs.edit()
+            .putInt("round_wait_seconds", vm.roundWaitSeconds)
+            .putInt("round_prompt_seconds", vm.roundPromptSeconds)
+            .putInt("security_cooldown_seconds", vm.securityCooldownSeconds)
+            .putInt("guest_cooldown_seconds", vm.guestCooldownSeconds)
+            .putBoolean("return_to_charge_after_round", vm.returnToChargeAfterRound)
+            .apply()
+    }
+
+    internal fun returnToHomeBase() {
+        val base = careWorkflow.resolveMapPoint(vm.homeBase)
+        setDestinationText(base)
+        setTask("Returning to base", "Navigating", vm.homeBase, 45)
+        speakReply("Task complete. Returning to ${vm.homeBase}.")
+        follow.stop()
+        val result = robot.startNavigation(base) { status ->
+            setStatus(status)
+            if (careWorkflow.isArrivalStatus(status)) {
+                setTask("At home base", "Ready", vm.homeBase, 0)
+                setStatus("Arrived at home base: ${vm.homeBase}.")
+            }
+        }
+        if (!result.ok) setStatus("Return to home base: ${result.message}")
+    }
+
+    internal fun handleAfterMission(taskName: String) {
+        when (vm.afterMissionBehavior) {
+            "home_base" -> returnToHomeBase()
+            "charge" -> {
+                speakReply("$taskName complete. Going to charge.")
+                setStatus(robot.goCharge().message)
+            }
+            "ask" -> speakReply("$taskName complete. I am standing by. Say return to base, go charge, or I will stay here.")
+            else -> {} // "stay" — no movement
+        }
+    }
+
+    internal fun saveHomeBaseSettings() {
+        prefs.edit()
+            .putString("home_base", vm.homeBase)
+            .putString("after_mission_behavior", vm.afterMissionBehavior)
+            .apply()
+    }
+
+    internal fun saveCloudSettings(url: String, token: String) {
+        prefs.edit()
+            .putString("cloud_url", url.trim().trimEnd('/').ifBlank { DEFAULT_CLOUD_URL })
+            .putString("cloud_token", token.trim().ifBlank { DEFAULT_ROBOT_TOKEN })
+            .apply()
+        cloudRelay.stop()
+        cloudRelay.start()
+        setStatus("Cloud settings saved. Reconnecting...")
     }
 
     internal fun localIpAddress(): String =
@@ -717,111 +808,145 @@ class MainActivity : Activity() {
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
-            val pad = dp(14).toFloat()
+            val pad = dp(12).toFloat()
             area.set(pad, pad, width - pad, height - pad)
+
             paint.style = Paint.Style.FILL
-            paint.color = Color.rgb(245, 250, 251)
-            canvas.drawRoundRect(area, dp(14).toFloat(), dp(14).toFloat(), paint)
-            drawFacilityBackdrop(canvas)
+            paint.color = Color.rgb(246, 249, 252)
+            canvas.drawRoundRect(area, dp(12).toFloat(), dp(12).toFloat(), paint)
+
+            val clip = Path().also { it.addRoundRect(area, dp(12).toFloat(), dp(12).toFloat(), Path.Direction.CW) }
+            canvas.save()
+            canvas.clipPath(clip)
+
+            drawGrid(canvas)
+
             val mappable = points.filter { it.x != null && it.y != null }
             if (mappable.isEmpty()) {
-                drawCentered(canvas, "Map points not loaded", area.centerX(), area.centerY(), Muted, 18f)
-                drawCentered(canvas, "Tap Refresh Points", area.centerX(), area.centerY() + dp(26), Primary, 14f)
+                canvas.restore()
+                drawCentered(canvas, "Map not loaded", area.centerX(), area.centerY() - dp(10), Muted, 14f)
+                drawCentered(canvas, "Tap Refresh Points", area.centerX(), area.centerY() + dp(12), Primary, 13f)
                 return
             }
+
             val xs = mappable.mapNotNull { it.x } + listOfNotNull(pose?.x)
             val ys = mappable.mapNotNull { it.y } + listOfNotNull(pose?.y)
-            val minX = xs.minOrNull() ?: 0.0
-            val maxX = xs.maxOrNull() ?: 1.0
-            val minY = ys.minOrNull() ?: 0.0
-            val maxY = ys.maxOrNull() ?: 1.0
-            val spanX = max(0.5, maxX - minX)
-            val spanY = max(0.5, maxY - minY)
+            val rawMinX = xs.minOrNull()!!; val rawMaxX = xs.maxOrNull()!!
+            val rawMinY = ys.minOrNull()!!; val rawMaxY = ys.maxOrNull()!!
+            val mgnX = max(0.5, (rawMaxX - rawMinX) * 0.22)
+            val mgnY = max(0.5, (rawMaxY - rawMinY) * 0.22)
+            val originX = rawMinX - mgnX; val originY = rawMinY - mgnY
+            val spanX = max(1.0, rawMaxX - rawMinX + mgnX * 2)
+            val spanY = max(1.0, rawMaxY - rawMinY + mgnY * 2)
+
             fun toScreen(px: Double?, py: Double?): Pair<Float, Float>? {
                 if (px == null || py == null) return null
-                val screenX = area.left + (((px - minX) / spanX).toFloat() * area.width()).coerceIn(0f, area.width())
-                val screenY = area.bottom - (((py - minY) / spanY).toFloat() * area.height()).coerceIn(0f, area.height())
-                return screenX to screenY
+                val sx = area.left + ((px - originX) / spanX).toFloat() * area.width()
+                val sy = area.bottom - ((py - originY) / spanY).toFloat() * area.height()
+                return sx.coerceIn(area.left + dp(6), area.right - dp(6)) to
+                    sy.coerceIn(area.top + dp(6), area.bottom - dp(6))
             }
-            val selected = mappable.firstOrNull { it.name.equals(selectedPointName, ignoreCase = true) }
-            val selectedScreen = selected?.let { toScreen(it.x, it.y) }
+
+            val selectedPoint = mappable.firstOrNull { it.name.equals(selectedPointName, ignoreCase = true) }
+            val selectedScreen = selectedPoint?.let { toScreen(it.x, it.y) }
             val robotScreen = pose?.let { toScreen(it.x, it.y) }
+
+            // Dashed route line
             if (robotScreen != null && selectedScreen != null) {
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = dp(4).toFloat()
-                paint.color = Accent
+                paint.strokeWidth = dp(2).toFloat()
+                paint.color = Color.argb(110, 0, 160, 210)
+                paint.pathEffect = DashPathEffect(floatArrayOf(dp(9).toFloat(), dp(5).toFloat()), 0f)
                 canvas.drawLine(robotScreen.first, robotScreen.second, selectedScreen.first, selectedScreen.second, paint)
+                paint.pathEffect = null
             }
+
+            // Points
             mappable.forEach { point ->
                 val screen = toScreen(point.x, point.y) ?: return@forEach
                 val isSelected = point.name.equals(selectedPointName, ignoreCase = true)
                 val isAlert = alertRoom?.isNotBlank() == true &&
                     (point.name.contains(alertRoom, ignoreCase = true) || alertRoom.contains(point.name, ignoreCase = true))
-                paint.style = Paint.Style.FILL
-                paint.color = when {
+                val color = when {
                     isAlert -> Danger
                     isSelected -> Primary
-                    else -> Color.rgb(109, 128, 137)
+                    else -> Color.rgb(125, 152, 165)
                 }
-                canvas.drawCircle(screen.first, screen.second, if (isSelected) dp(8).toFloat() else dp(5).toFloat(), paint)
-                if (isSelected || isAlert) {
-                    drawLabel(canvas, if (isSelected) point.name else "Alert", screen.first + dp(10), screen.second - dp(8), paint.color)
-                }
-            }
-            if (robotScreen != null) {
+                val r = when { isSelected -> dp(9).toFloat(); isAlert -> dp(8).toFloat(); else -> dp(5).toFloat() }
                 paint.style = Paint.Style.FILL
+                paint.color = Color.argb(30, 0, 0, 0)
+                canvas.drawCircle(screen.first + dp(1), screen.second + dp(2), r, paint)
+                paint.color = color
+                canvas.drawCircle(screen.first, screen.second, r, paint)
+                if (isSelected) {
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = dp(2).toFloat()
+                    paint.color = color
+                    canvas.drawCircle(screen.first, screen.second, r + dp(4), paint)
+                }
+                drawPointLabel(canvas, point.name, screen.first, screen.second, color, isSelected || isAlert)
+            }
+
+            // Robot
+            if (robotScreen != null) {
+                val rr = dp(11).toFloat()
+                paint.style = Paint.Style.FILL
+                paint.color = Color.argb(30, 0, 0, 0)
+                canvas.drawCircle(robotScreen.first + dp(2), robotScreen.second + dp(2), rr, paint)
                 paint.color = Color.WHITE
-                canvas.drawCircle(robotScreen.first, robotScreen.second, dp(15).toFloat(), paint)
+                canvas.drawCircle(robotScreen.first, robotScreen.second, rr, paint)
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = dp(4).toFloat()
-                paint.color = Color.rgb(33, 183, 199)
-                canvas.drawCircle(robotScreen.first, robotScreen.second, dp(15).toFloat(), paint)
-                drawLabel(canvas, "Nova", robotScreen.first + dp(18), robotScreen.second + dp(4), PrimaryDark)
+                paint.strokeWidth = dp(3).toFloat()
+                paint.color = Color.rgb(0, 178, 202)
+                canvas.drawCircle(robotScreen.first, robotScreen.second, rr, paint)
+                val hx = (robotScreen.first + Math.cos(pose.theta) * rr * 1.8).toFloat()
+                val hy = (robotScreen.second - Math.sin(pose.theta) * rr * 1.8).toFloat()
+                canvas.drawLine(robotScreen.first, robotScreen.second, hx, hy, paint)
+                drawPointLabel(canvas, "Nova", robotScreen.first, robotScreen.second, PrimaryDark, true)
+            }
+
+            canvas.restore()
+        }
+
+        private fun drawGrid(canvas: Canvas) {
+            val step = dp(28).toFloat()
+            paint.style = Paint.Style.FILL
+            paint.color = Color.argb(40, 150, 180, 200)
+            var gx = area.left + step
+            while (gx < area.right) {
+                var gy = area.top + step
+                while (gy < area.bottom) {
+                    canvas.drawCircle(gx, gy, dp(2).toFloat(), paint)
+                    gy += step
+                }
+                gx += step
             }
         }
 
-        private fun drawFacilityBackdrop(canvas: Canvas) {
+        private fun drawPointLabel(canvas: Canvas, text: String, cx: Float, cy: Float, color: Int, bold: Boolean) {
+            val label = if (text.length > 14) text.take(13) + "…" else text
             paint.style = Paint.Style.FILL
-            paint.color = Color.rgb(230, 240, 243)
-            val mainHall = RectF(area.left + area.width() * 0.08f, area.centerY() - dp(18), area.right - area.width() * 0.08f, area.centerY() + dp(18))
-            canvas.drawRoundRect(mainHall, dp(18).toFloat(), dp(18).toFloat(), paint)
-            val crossHall = RectF(area.centerX() - dp(20), area.top + dp(22), area.centerX() + dp(20), area.bottom - dp(22))
-            canvas.drawRoundRect(crossHall, dp(18).toFloat(), dp(18).toFloat(), paint)
-            paint.style = Paint.Style.STROKE
-            paint.strokeWidth = dp(2).toFloat()
-            paint.color = Color.rgb(203, 218, 223)
-            val rooms = listOf(
-                RectF(area.left + dp(18), area.top + dp(18), area.left + area.width() * 0.28f, area.top + area.height() * 0.33f),
-                RectF(area.right - area.width() * 0.28f, area.top + dp(18), area.right - dp(18), area.top + area.height() * 0.33f),
-                RectF(area.left + dp(18), area.bottom - area.height() * 0.33f, area.left + area.width() * 0.28f, area.bottom - dp(18)),
-                RectF(area.right - area.width() * 0.28f, area.bottom - area.height() * 0.33f, area.right - dp(18), area.bottom - dp(18))
-            )
-            rooms.forEach { canvas.drawRoundRect(it, dp(10).toFloat(), dp(10).toFloat(), paint) }
-            paint.style = Paint.Style.FILL
-            paint.textSize = dp(11).toFloat()
-            paint.typeface = Typeface.DEFAULT_BOLD
-            paint.color = Color.rgb(112, 132, 139)
-            canvas.drawText("Care wing", area.left + dp(28), area.top + dp(38), paint)
-            canvas.drawText("Clinic", area.right - area.width() * 0.25f, area.top + dp(38), paint)
-            canvas.drawText("Lobby", area.left + dp(28), area.bottom - dp(36), paint)
-            canvas.drawText("Rooms", area.right - area.width() * 0.25f, area.bottom - dp(36), paint)
-        }
-
-        private fun drawLabel(canvas: Canvas, text: String, x: Float, y: Float, color: Int) {
-            val label = if (text.length > 16) text.take(15) + "." else text
-            paint.style = Paint.Style.FILL
-            paint.textSize = dp(12).toFloat()
-            paint.typeface = Typeface.DEFAULT_BOLD
-            val labelWidth = paint.measureText(label)
-            val rect = RectF(x - dp(5), y - dp(18), x + labelWidth + dp(7), y + dp(5))
-            paint.color = Color.argb(235, 255, 255, 255)
-            canvas.drawRoundRect(rect, dp(6).toFloat(), dp(6).toFloat(), paint)
+            paint.pathEffect = null
+            paint.textSize = dp(if (bold) 12 else 11).toFloat()
+            paint.typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            val tw = paint.measureText(label)
+            val th = dp(14).toFloat()
+            var lx = cx + dp(12)
+            var ly = cy - dp(3)
+            if (lx + tw + dp(8) > area.right - dp(4)) lx = cx - tw - dp(14)
+            if (ly - th < area.top + dp(4)) ly = cy + dp(17)
+            lx = lx.coerceIn(area.left + dp(4), area.right - tw - dp(4))
+            ly = ly.coerceIn(area.top + th, area.bottom - dp(4))
+            val bg = RectF(lx - dp(4), ly - th, lx + tw + dp(5), ly + dp(4))
+            paint.color = Color.argb(220, 255, 255, 255)
+            canvas.drawRoundRect(bg, dp(5).toFloat(), dp(5).toFloat(), paint)
             paint.color = color
-            canvas.drawText(label, x, y, paint)
+            canvas.drawText(label, lx, ly, paint)
         }
 
         private fun drawCentered(canvas: Canvas, text: String, x: Float, y: Float, color: Int, sp: Float) {
             paint.style = Paint.Style.FILL
+            paint.pathEffect = null
             paint.textSize = sp * resources.displayMetrics.scaledDensity
             paint.typeface = Typeface.DEFAULT_BOLD
             paint.color = color

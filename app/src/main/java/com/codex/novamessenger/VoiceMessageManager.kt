@@ -99,11 +99,17 @@ class VoiceMessageManager(private val activity: Activity) : TextToSpeech.OnInitL
 
     fun playAudio(path: String) {
         player?.release()
-        player = MediaPlayer().apply {
-            setDataSource(path)
-            setOnCompletionListener { it.release() }
-            prepare()
-            start()
+        player = null
+        val mp = MediaPlayer()
+        try {
+            mp.setDataSource(path)
+            mp.setOnCompletionListener { it.release() }
+            mp.prepare()
+            mp.start()
+            player = mp
+        } catch (e: Exception) {
+            mp.release()
+            throw e
         }
     }
 
