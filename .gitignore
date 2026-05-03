@@ -1,0 +1,17 @@
+cloud-relay/.data/
+.gradle/
+.idea/
+.kotlin/
+build/
+app/build/
+local.properties
+*.apk
+*.ap_
+*.dex
+*.class
+*.log
+vendor/*.zip
+vendor/agentos-sdk-main/
+vendor/end2end_sample-main/
+screen_audit/
+final_audit/
