@@ -281,6 +281,8 @@ body{margin:0;background:#eef2f7;color:#111827;font-family:Inter,system-ui,-appl
 .topRight{display:flex;gap:8px;align-items:center}
 .content{padding:20px;flex:1}
 .view{display:none}.view.active{display:block}
+#view-command{display:block}
+#view-command.hidden{display:none}
 .g5{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
 .g3{display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:14px;margin-top:14px}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
@@ -540,118 +542,129 @@ select.field{cursor:pointer}
 </div></main></div>
 <div class="toast" id="toast"></div>
 <script>
-const columns=${JSON.stringify(residentColumns)};
-const T={command:["Command Center","Live data from Nova and your facility registry."],robots:["Robot Feeds","Telemetry and people detection feed from Nova."],rounds:["Care Rounds","Launch rounds and check in with registered residents."],residents:["Residents","Manage the resident registry and send Nova on check-ins."],alerts:["Alerts","Create urgent staff alerts and monitor facility events."],map:["Map &amp; Messaging","Live map points from Nova."],logs:["Operations Log","Commands, state updates and facility actions."],settings:["Settings","Relay status, users, logo and CSV format."]};
-async function get(p){try{const r=await fetch(p,{cache:"no-store"});return r.ok?r.json():{}}catch(e){return{}}}
-async function post(p,b){try{const r=await fetch(p,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b)});return r.json()}catch(e){return{ok:false,error:"Network error"}}}
-async function cmd(action,params={}){const out=await post("/api/command",{action,params});notice(out.ok?"Command sent to Nova":"Error: "+(out.error||"failed"),out.ok);refresh()}
+var columns=${JSON.stringify(residentColumns)};
+var T={command:["Command Center","Live data from Nova and your facility registry."],robots:["Robot Feeds","Telemetry and people detection feed from Nova."],rounds:["Care Rounds","Launch rounds and check in with registered residents."],residents:["Residents","Manage the resident registry and send Nova on check-ins."],alerts:["Alerts","Create urgent staff alerts and monitor facility events."],map:["Map &amp; Messaging","Live map points from Nova."],logs:["Operations Log","Commands, state updates and facility actions."],settings:["Settings","Relay status, users, logo and CSV format."]};
+function get(p){return fetch(p,{cache:"no-store"}).then(function(r){return r.ok?r.json():{};}).catch(function(){return{};})}
+function post(p,b){return fetch(p,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b)}).then(function(r){return r.json();}).catch(function(){return{ok:false,error:"Network error"};})}
+function cmd(action,params){params=params||{};post("/api/command",{action:action,params:params}).then(function(out){notice(out.ok?"Command sent to Nova":"Error: "+(out.error||"failed"),out.ok);refresh();});}
 function esc(v){return String(v||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 function notice(t,ok=true){const el=document.getElementById("toast");if(!el)return;el.textContent=t;el.style.background=ok?"#0d1f3c":"#7a1c1c";el.style.display="block";clearTimeout(notice._t);notice._t=setTimeout(()=>el.style.display="none",3000)}
 function sv(name,el){
-  document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));
-  const view=document.getElementById("view-"+name);if(view)view.classList.add("active");
-  document.querySelectorAll(".nav a").forEach(a=>a.classList.remove("active"));
-  (el||document.querySelector('.nav a[data-view="'+name+'"]'))?.classList.add("active");
-  const pt=document.getElementById("pageTitle");const ps=document.getElementById("pageSubtitle");
-  if(pt)pt.innerHTML=T[name]?.[0]||name;
-  if(ps)ps.innerHTML=T[name]?.[1]||"";
+  var views=document.querySelectorAll(".view");
+  for(var i=0;i<views.length;i++){views[i].classList.remove("active");views[i].classList.add("hidden");}
+  var view=document.getElementById("view-"+name);if(view){view.classList.add("active");view.classList.remove("hidden");}
+  var navLinks=document.querySelectorAll(".nav a");
+  for(var j=0;j<navLinks.length;j++)navLinks[j].classList.remove("active");
+  var target=el||document.querySelector('.nav a[data-view="'+name+'"]');
+  if(target)target.classList.add("active");
+  var pt=document.getElementById("pageTitle");var ps=document.getElementById("pageSubtitle");
+  if(pt&&T[name])pt.innerHTML=T[name][0]||name;
+  if(ps&&T[name])ps.innerHTML=T[name][1]||"";
 }
 function rRow(col,title,sub,right=""){return '<div class="row"><div class="dot c-'+col+'">'+esc(String(title||"?")[0])+'</div><div class="rb"><b>'+esc(title)+'</b><span>'+esc(sub)+'</span></div><div class="ra">'+right+'</div></div>'}
 function esb(t){return '<div class="esbox" style="min-height:70px">'+esc(t)+'</div>'}
-function byId(id){return(window._s?.care?.residents||[]).find(r=>r.id===id)||null}
-function rParams(id){const r=byId(id||residentSelect?.value);return r?{residentId:r.id,residentName:r.name,room:r.room,mapPoint:r.mapPoint||r.room,notes:[r.medicationNotes,r.mobilityNotes,r.emergencyNotes].filter(Boolean).join("; "),checkInPrompt:r.checkInSchedule||""}:{residentId:id||""}}
-function checkInResident(id){if(!id)return notice("Select a resident first.",false);cmd("resident_checkin",rParams(id))}
-function medResident(id){if(!id)return notice("Select a resident first.",false);cmd("med_reminder",rParams(id))}
-function checkInSelected(){checkInResident(residentSelect?.value)}
-function medSelected(){medResident(residentSelect?.value)}
-function guideSelected(){const p=pointSelect?.value;if(!p||p.startsWith("No "))return notice("No map points received from Nova yet.",false);cmd("visitor_guide",{destination:p})}
-function staffAlert(){cmd("staff_alert",{priority:"urgent",message:"Staff assistance requested."})}
-function sendMessage(){const p=pointSelect?.value;if(!p||p.startsWith("No "))return notice("No map points received from Nova yet.",false);cmd("message",{destination:p,message:document.getElementById("messageText")?.value||"Please meet Nova at this location."})}
+function byId(id){var s=window._s;var res=(s&&s.care&&s.care.residents)||[];for(var i=0;i<res.length;i++){if(res[i].id===id)return res[i];}return null;}
+function rParams(id){var el=document.getElementById("residentSelect");var rid=id||(el&&el.value)||"";var r=byId(rid);if(r){return{residentId:r.id,residentName:r.name,room:r.room,mapPoint:r.mapPoint||r.room,notes:[r.medicationNotes,r.mobilityNotes,r.emergencyNotes].filter(Boolean).join("; "),checkInPrompt:r.checkInSchedule||""};}return{residentId:rid};}
+function checkInResident(id){if(!id)return notice("Select a resident first.",false);cmd("resident_checkin",rParams(id));}
+function medResident(id){if(!id)return notice("Select a resident first.",false);cmd("med_reminder",rParams(id));}
+function checkInSelected(){var el=document.getElementById("residentSelect");checkInResident(el&&el.value);}
+function medSelected(){var el=document.getElementById("residentSelect");medResident(el&&el.value);}
+function guideSelected(){var el=document.getElementById("pointSelect");var p=el&&el.value;if(!p||p.indexOf("No ")==0)return notice("No map points received from Nova yet.",false);cmd("visitor_guide",{destination:p});}
+function staffAlert(){cmd("staff_alert",{priority:"urgent",message:"Staff assistance requested."});}
+function sendMessage(){var el=document.getElementById("pointSelect");var p=el&&el.value;if(!p||p.indexOf("No ")==0)return notice("No map points received from Nova yet.",false);var mt=document.getElementById("messageText");cmd("message",{destination:p,message:(mt&&mt.value)||"Please meet Nova at this location."});}
 let _eid=null;
 function editResident(id){
   const r=byId(id);if(!r)return notice("Resident not loaded yet. Try again in a moment.",false);
   _eid=id;
-  const f={manualName:r.name,manualRoom:r.room,manualMapPoint:r.mapPoint||r.room,manualWing:r.wing,manualCare:r.careLevel,manualPhone:r.contactPhone,manualNotes:[r.medicationNotes,r.mobilityNotes,r.emergencyNotes].filter(Boolean).join("; "),manualPrompt:r.checkInSchedule};
-  Object.entries(f).forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.value=v||""});
+  var fields={manualName:r.name,manualRoom:r.room,manualMapPoint:r.mapPoint||r.room,manualWing:r.wing||"",manualCare:r.careLevel||"",manualPhone:r.contactPhone||"",manualNotes:[r.medicationNotes,r.mobilityNotes,r.emergencyNotes].filter(Boolean).join("; "),manualPrompt:r.checkInSchedule||""};
+  Object.keys(fields).forEach(function(fid){var el=document.getElementById(fid);if(el)el.value=fields[fid];});
   document.getElementById("saveResBtn").textContent="Save Changes";
   document.getElementById("cancelEditBtn").style.display="inline-flex";
   document.getElementById("resFormTitle").textContent="Edit Resident";
   sv("residents",document.querySelector('[data-view="residents"]'));
-  setTimeout(()=>document.getElementById("resFormCard")?.scrollIntoView({behavior:"smooth",block:"start"}),100);
-  document.getElementById("manualName")?.focus();
+  setTimeout(function(){var fc=document.getElementById("resFormCard");if(fc)fc.scrollIntoView({behavior:"smooth",block:"start"});},100);
+  var mn=document.getElementById("manualName");if(mn)mn.focus();
 }
 function cancelEdit(){
   _eid=null;
-  ["manualName","manualRoom","manualMapPoint","manualWing","manualCare","manualPhone","manualNotes","manualPrompt"].forEach(id=>{const el=document.getElementById(id);if(el)el.value=""});
+  ["manualName","manualRoom","manualMapPoint","manualWing","manualCare","manualPhone","manualNotes","manualPrompt"].forEach(function(fid){var el=document.getElementById(fid);if(el)el.value="";});
   document.getElementById("saveResBtn").textContent="Add Resident";
   document.getElementById("cancelEditBtn").style.display="none";
   document.getElementById("resFormTitle").textContent="Add Resident";
 }
-async function saveResident(){
-  const name=document.getElementById("manualName")?.value.trim();
-  const room=document.getElementById("manualRoom")?.value.trim();
+function saveResident(){
+  var nameEl=document.getElementById("manualName");var roomEl=document.getElementById("manualRoom");
+  var name=nameEl&&nameEl.value.trim();var room=roomEl&&roomEl.value.trim();
   if(!name)return notice("Full name is required.",false);
   if(!room)return notice("Room is required.",false);
-  const mapPoint=document.getElementById("manualMapPoint")?.value.trim()||room;
-  const b={full_name:name,room,map_point:mapPoint,wing:document.getElementById("manualWing")?.value.trim()||"",care_level:document.getElementById("manualCare")?.value.trim()||"",primary_contact_phone:document.getElementById("manualPhone")?.value.trim()||"",medication_notes:document.getElementById("manualNotes")?.value.trim()||"",check_in_schedule:document.getElementById("manualPrompt")?.value.trim()||""};
+  var mpEl=document.getElementById("manualMapPoint");var mapPoint=(mpEl&&mpEl.value.trim())||room;
+  function gv(id){var e=document.getElementById(id);return(e&&e.value.trim())||"";}
+  var b={full_name:name,room:room,map_point:mapPoint,wing:gv("manualWing"),care_level:gv("manualCare"),primary_contact_phone:gv("manualPhone"),medication_notes:gv("manualNotes"),check_in_schedule:gv("manualPrompt")};
   if(_eid)b.resident_id=_eid;
-  const out=await post("/api/residents",b);
-  notice(out.ok?(_eid?"Resident updated successfully":"Resident added"):(out.error||"Could not save"),out.ok);
-  if(out.ok)cancelEdit();
-  refresh();
+  post("/api/residents",b).then(function(out){
+    notice(out.ok?(_eid?"Resident updated successfully":"Resident added"):(out.error||"Could not save"),out.ok);
+    if(out.ok)cancelEdit();
+    refresh();
+  });
 }
-async function deleteResident(id){
+function deleteResident(id){
   if(!confirm("Remove this resident? This cannot be undone."))return;
-  const out=await(await fetch("/api/residents/"+encodeURIComponent(id),{method:"DELETE"})).json();
-  notice(out.ok?"Resident removed":(out.error||"Could not remove"),out.ok);
-  refresh();
+  fetch("/api/residents/"+encodeURIComponent(id),{method:"DELETE"}).then(function(r){return r.json();}).then(function(out){
+    notice(out.ok?"Resident removed":(out.error||"Could not remove"),out.ok);refresh();
+  });
 }
-async function createAlert(priority){
-  const msg=document.getElementById("alertMessage")?.value.trim();
+function createAlert(priority){
+  var msgEl=document.getElementById("alertMessage");var msg=msgEl&&msgEl.value.trim();
   if(!msg)return notice("Please describe the situation.",false);
-  const room=document.getElementById("alertRoom")?.value.trim()||"";
+  var roomEl=document.getElementById("alertRoom");var room=(roomEl&&roomEl.value.trim())||"";
   const out=await post("/api/alerts",{priority:priority||"urgent",room,message:msg});
   notice(out.ok?"Alert created and sent to Nova":(out.error||"Could not create alert"),out.ok);
-  if(out.ok){const ar=document.getElementById("alertRoom");const am=document.getElementById("alertMessage");if(ar)ar.value="";if(am)am.value=""}
+  if(out.ok){var ar=document.getElementById("alertRoom");var am=document.getElementById("alertMessage");if(ar)ar.value="";if(am)am.value="";}
   refresh();
 }
-async function dismissAlert(id){
-  const out=await post("/api/alerts/"+encodeURIComponent(id)+"/dismiss",{});
-  notice(out.ok?"Alert dismissed":(out.error||"Could not dismiss"),out.ok);
-  refresh();
+function dismissAlert(id){
+  post("/api/alerts/"+encodeURIComponent(id)+"/dismiss",{}).then(function(out){
+    notice(out.ok?"Alert dismissed":(out.error||"Could not dismiss"),out.ok);refresh();
+  });
 }
-async function uploadResidents(){
-  const file=document.getElementById("residentFile")?.files[0];
+function uploadResidents(){
+  var fi=document.getElementById("residentFile");var file=fi&&fi.files&&fi.files[0];
   if(!file)return notice("Choose the completed CSV first.",false);
-  const out=await(await fetch("/api/residents/import",{method:"POST",headers:{"content-type":"text/csv"},body:await file.text()})).json();
-  notice(out.ok?"Imported "+out.count+" residents":(out.error||"Import failed"),out.ok);
-  const rf=document.getElementById("residentFile");if(rf)rf.value="";
-  refresh();
+  var reader=new FileReader();
+  reader.onload=function(){
+    fetch("/api/residents/import",{method:"POST",headers:{"content-type":"text/csv"},body:reader.result}).then(function(r){return r.json();}).then(function(out){
+      notice(out.ok?"Imported "+out.count+" residents":(out.error||"Import failed"),out.ok);
+      var rf=document.getElementById("residentFile");if(rf)rf.value="";refresh();
+    });
+  };
+  reader.readAsText(file);
 }
-async function uploadLogo(){
-  const file=document.getElementById("logoFile")?.files[0];
+function uploadLogo(){
+  var fi=document.getElementById("logoFile");var file=fi&&fi.files&&fi.files[0];
   if(!file)return notice("Choose the logo image first.",false);
   if(file.size>5*1024*1024)return notice("Logo too large. Use PNG/JPEG under 5 MB.",false);
-  const reader=new FileReader();
-  reader.onload=async()=>{
-    const out=await post("/api/logo",{dataUrl:reader.result});
-    notice(out.ok?"Logo updated":(out.error||"Failed"),out.ok);
-    if(out.logo){const lp=document.getElementById("logoPreview");const sl=document.getElementById("sideLogo");if(lp)lp.src=out.logo;if(sl)sl.innerHTML='<img src="'+out.logo+'" alt="ZOX">'}
-    const lf=document.getElementById("logoFile");if(lf)lf.value="";
+  var reader=new FileReader();
+  reader.onload=function(){
+    post("/api/logo",{dataUrl:reader.result}).then(function(out){
+      notice(out.ok?"Logo updated":(out.error||"Failed"),out.ok);
+      if(out.logo){var lp=document.getElementById("logoPreview");var sl=document.getElementById("sideLogo");if(lp)lp.src=out.logo;if(sl)sl.innerHTML='<img src="'+out.logo+'" alt="ZOX">';}
+      var lf=document.getElementById("logoFile");if(lf)lf.value="";
+    });
   };
   reader.readAsDataURL(file);
 }
-async function addUser(){
-  const u=document.getElementById("newUser")?.value;const p=document.getElementById("newPass")?.value;const r=document.getElementById("newRole")?.value;
-  const out=await post("/api/users",{username:u,password:p,role:r});
-  notice(out.ok?"User added":(out.error||"Could not add user"),out.ok);
-  const nu=document.getElementById("newUser");const np=document.getElementById("newPass");if(nu)nu.value="";if(np)np.value="";
-  loadUsers();
+function addUser(){
+  var u=document.getElementById("newUser");var p=document.getElementById("newPass");var r=document.getElementById("newRole");
+  post("/api/users",{username:u&&u.value,password:p&&p.value,role:r&&r.value}).then(function(out){
+    notice(out.ok?"User added":(out.error||"Could not add user"),out.ok);
+    if(u)u.value="";if(p)p.value="";loadUsers();
+  });
 }
-async function loadUsers(){
-  const out=await get("/api/users");
-  const el=document.getElementById("userList");if(!el)return;
-  el.innerHTML=out.users?out.users.map(u=>rRow("blue",u.username,u.role+" &middot; Added "+new Date(u.createdAt).toLocaleDateString())).join(""):esb(out.error||"Could not load users");
+function loadUsers(){
+  get("/api/users").then(function(out){
+    var el=document.getElementById("userList");if(!el)return;
+    el.innerHTML=out.users?out.users.map(function(u){return rRow("blue",u.username,u.role+" &middot; Added "+new Date(u.createdAt).toLocaleDateString());}).join(""):esb(out.error||"Could not load users");
+  });
 }
 function renderMap(target,points){
   if(!target)return;
@@ -670,42 +683,44 @@ function aCard(a){
 }
 function renderAll(s){
   if(!s||typeof s!=="object")return;
-  const c=s.care||{};const res=c.residents||[];const rem=c.reminders||[];const al=c.alerts||[];const pts=s.points||[];const ppl=s.people||[];
+  var c=s.care||{};var res=c.residents||[];var rem=c.reminders||[];var al=c.alerts||[];var pts=s.points||[];var ppl=s.people||[];
   window._s=s;
-  const $ =id=>document.getElementById(id);
-  const set=(id,v)=>{const e=$(id);if(e)e.textContent=v};
-  const html=(id,v)=>{const e=$(id);if(e)e.innerHTML=v};
-  set("statRobot",s.online?"Online":"Offline");set("statResidents",res.length);set("statPoints",pts.length);set("statPeople",ppl.length);set("statCamera",s.camera?"Active":"Off");
-  const so=$("sideOnline");if(so){so.textContent=(s.online?"1":"0")+" / 1";so.className="pill "+(s.online?"ok":"off")}
-  set("sideHealth",s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"}):"Waiting for robot connection");
-  const op=$("onlinePill");if(op){op.textContent=s.online?"Online":"Offline";op.className="pill "+(s.online?"ok":"off")}
-  const ac=$("alertCount");if(ac){if(al.length){ac.style.display="inline-flex";ac.textContent=al.length+" alert"+(al.length===1?"":"s");ac.className="pill bad"}else ac.style.display="none"}
-  const bat=esc(s.status?.battery||"");const dest=esc(s.status?.destination||"");const stat=esc(s.status?.status||"");
-  const robotHtml='<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f0f4fa"><div class="dot c-'+(s.online?"blue":"red")+'" style="width:42px;height:42px;font-size:16px">N</div><div style="flex:1"><div style="font-weight:700;font-size:14px">Nova 01</div><div style="font-size:12px;color:#8898b0;margin-top:2px">'+(dest||"No active destination")+"</div></div>"+(s.online?'<span class="pill ok" style="white-space:nowrap">Online</span>':'<span class="pill off">Offline</span>')+"</div>"+(bat?'<div style="margin-top:8px;font-size:12px;color:#5a6a80"><b style="color:#374151">Battery:</b> '+bat+"</div>":"")+(stat?'<div style="margin-top:4px;font-size:12px;color:#5a6a80"><b style="color:#374151">Status:</b> '+stat+"</div>":"");
-  html("robotBox",robotHtml);html("robotsFleet",robotHtml);
-  html("residentBox",res.length?res.slice(0,4).map(r=>'<div class="row"><div class="dot c-purple">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+esc(r.room)+'</span></div><div class="ra"><button class="btn s p" onclick="checkInResident(\''+esc(r.id)+'\')">Go</button></div></div>').join("")+(res.length>4?'<p style="font-size:12px;color:#8898b0;margin:8px 0 0">+'+(res.length-4)+" more</p>":""):esb("No residents yet. Add them in the Residents section."));
-  html("alertBox",al.length?al.slice(0,3).map(a=>'<div class="row"><div class="dot c-'+(a.priority!=="standard"?"red":"yellow")+'">!</div><div class="rb"><b>'+esc((a.message||"Alert").slice(0,60))+'</b><span>'+esc(a.room||"Facility")+'</span></div><div class="ra"><button class="btn s d" onclick="dismissAlert(\''+esc(a.id)+'\')">&#215;</button></div></div>').join("")+(al.length>3?'<p style="font-size:12px;color:#8898b0;margin:8px 0 0">+'+(al.length-3)+" more</p>":""):esb("No active alerts."));
-  html("peopleBox",ppl.length?ppl.map(p=>'<div class="dchip"><div class="dc"></div>Person&nbsp;'+(p.id||"?")+' &mdash; '+(p.distance!=null?p.distance+"m away":"detected")+'</div>').join(""):esb("No people detected by Nova."));
-  renderMap($("mapBox"),pts);renderMap($("fullMapBox"),pts);
-  const sdkOk=!!s.status?.robotSdk;
-  html("robotDiagnostics",rRow(sdkOk?"green":"yellow","Robot SDK",sdkOk?"AgentOS connected":"No SDK connection detected")+rRow("blue","Map Points",pts.length+" point"+(pts.length!==1?"s":"")+" known")+rRow(s.camera?"green":"red","Camera Feed",s.camera?"Frame available":"No frame received"));
-  html("detectionList",ppl.length?ppl.map(p=>'<div class="row"><div class="dot c-cyan" style="font-size:11px">&#9679;</div><div class="rb"><b>Person detected</b><span>'+(p.distance!=null?"Distance: "+p.distance+"m":"Position: x="+(p.x??"-")+", y="+(p.y??"-"))+"</span></div></div>").join(""):esb("No people currently in Nova's detection range."));
-  html("roundResidents",res.length?res.map(r=>'<div class="row"><div class="dot c-blue">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+esc(r.room)+'</span></div><div class="ra"><button class="btn s p" onclick="checkInResident(\''+esc(r.id)+'\')">Check In</button><button class="btn s" onclick="medResident(\''+esc(r.id)+'\')">Med</button></div></div>').join(""):esb("Register residents to use care rounds."));
-  html("roundSchedule",rem.length?rem.map(r=>rRow("green",r.timeLabel||"Scheduled",r.title||"Reminder")).join(""):esb("No reminders from Nova."));
-  html("residentDirectory",res.length?res.map(r=>'<div class="row"><div class="dot c-purple">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+esc(r.room+(r.wing?" &middot; "+r.wing:"")+(r.careLevel?" &mdash; "+r.careLevel:""))+'</span></div><div class="ra"><button class="btn s" onclick="editResident(\''+esc(r.id)+'\')">Edit</button><button class="btn s d" onclick="deleteResident(\''+esc(r.id)+'\')">Remove</button></div></div>').join(""):esb("No residents. Add one using the form."));
-  const rs=$("residentSelect");if(rs)rs.innerHTML=res.length?res.map(r=>'<option value="'+esc(r.id)+'">'+esc(r.name)+" &mdash; Room "+esc(r.room)+"</option>").join(""):"<option disabled>No residents registered yet</option>";
-  html("alertCenter",al.length?al.map(aCard).join(""):esb("No active alerts."));
-  const ps=$("pointSelect");if(ps)ps.innerHTML=pts.length?pts.map(p=>'<option value="'+esc(p.name)+'">'+esc(p.name)+"</option>").join(""):"<option disabled>No map points from Nova yet</option>";
-  const logRows=[...(c.logs||[]),...(s.events||[]).slice().reverse().map(e=>({createdAt:e.at,title:e.type,detail:typeof e.data==="object"?Object.entries(e.data||{}).slice(0,4).map(([k,v])=>k+": "+String(v).slice(0,40)).join(", "):String(e.data||"")}))];
-  html("opsLog",(logRows.length?logRows:[{title:"Ready",detail:"Waiting for robot and facility activity."}]).slice(0,80).map(l=>'<tr><td style="width:75px;white-space:nowrap;color:#8898b0;font-size:12px">'+new Date(l.createdAt||Date.now()).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})+"</td><td style='font-weight:600;font-size:13px'>"+esc(l.title||"Event")+"</td><td style='font-size:12px;color:#5a6a80'>"+esc(String(l.detail||"").slice(0,140))+"</td></tr>").join(""));
-  const fh={resident_id:"Optional. Auto-generated if blank.",full_name:"Required.",room:"Required.",map_point:"Exact Nova map point name. Falls back to room.",wing:"Optional.",care_level:"Independent / Assisted / High.",primary_contact_name:"Optional.",primary_contact_phone:"Optional.",medication_notes:"Medication schedule.",mobility_notes:"Mobility aids and restrictions.",preferred_language:"Communication preference.",check_in_schedule:"e.g. daily 09:00",emergency_notes:"Critical staff notes."};
-  html("formatRows",columns.map(col=>'<tr><td style="font-weight:700;font-size:12px;white-space:nowrap">'+col+'</td><td style="font-size:12px;color:#5a6a80">'+esc(fh[col]||"")+"</td></tr>").join(""));
-  html("settingsRelay",rRow(s.online?"green":"red","Robot Connection",s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"Not connected")+rRow(s.camera?"green":"red","Camera Feed",s.camera?"Frame available":"No frame")+rRow("blue","Resident Registry",res.length+" registered"));
-  const cb=$("cameraBox");const nc=$("noCamera");const cam=$("camera");const cn=$("cameraNote");
-  if(s.camera){if(cb)cb.style.display="block";if(nc)nc.style.display="none";if(cam)cam.src="/api/camera.jpg?t="+Date.now();if(cn)cn.textContent="Live snapshot — updates every 2s"}
-  else{if(cb)cb.style.display="none";if(nc)nc.style.display="grid"}
+  function gi(id){return document.getElementById(id);}
+  function st(id,v){var e=gi(id);if(e)e.textContent=v;}
+  function ht(id,v){var e=gi(id);if(e)e.innerHTML=v;}
+  st("statRobot",s.online?"Online":"Offline");st("statResidents",res.length);st("statPoints",pts.length);st("statPeople",ppl.length);st("statCamera",s.camera?"Active":"Off");
+  var so=gi("sideOnline");if(so){so.textContent=(s.online?"1":"0")+" / 1";so.className="pill "+(s.online?"ok":"off");}
+  st("sideHealth",s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"}):"Waiting for robot connection");
+  var op=gi("onlinePill");if(op){op.textContent=s.online?"Online":"Offline";op.className="pill "+(s.online?"ok":"off");}
+  var ac=gi("alertCount");if(ac){if(al.length){ac.style.display="inline-flex";ac.textContent=al.length+" alert"+(al.length===1?"":"s");ac.className="pill bad";}else ac.style.display="none";}
+  var status=s.status||{};
+  var bat=esc(status.battery||"");var dest=esc(status.destination||"");var stat=esc(status.status||"");
+  var robotHtml='<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f0f4fa"><div class="dot c-'+(s.online?"blue":"red")+'" style="width:42px;height:42px;font-size:16px">N</div><div style="flex:1"><div style="font-weight:700;font-size:14px">Nova 01</div><div style="font-size:12px;color:#8898b0;margin-top:2px">'+(dest||"No active destination")+"</div></div>"+(s.online?'<span class="pill ok" style="white-space:nowrap">Online</span>':'<span class="pill off">Offline</span>')+"</div>"+(bat?'<div style="margin-top:8px;font-size:12px;color:#5a6a80"><b style="color:#374151">Battery:</b> '+bat+"</div>":"")+(stat?'<div style="margin-top:4px;font-size:12px;color:#5a6a80"><b style="color:#374151">Status:</b> '+stat+"</div>":"");
+  ht("robotBox",robotHtml);ht("robotsFleet",robotHtml);
+  ht("residentBox",res.length?res.slice(0,4).map(function(r){return'<div class="row"><div class="dot c-purple">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+esc(r.room)+'</span></div><div class="ra"><button class="btn s p" onclick="checkInResident(\''+esc(r.id)+'\')">Go</button></div></div>';}).join("")+(res.length>4?'<p style="font-size:12px;color:#8898b0;margin:8px 0 0">+'+(res.length-4)+" more</p>":""):esb("No residents yet. Add them in the Residents section."));
+  ht("alertBox",al.length?al.slice(0,3).map(function(a){return'<div class="row"><div class="dot c-'+(a.priority!=="standard"?"red":"yellow")+'">!</div><div class="rb"><b>'+esc((a.message||"Alert").slice(0,60))+'</b><span>'+esc(a.room||"Facility")+'</span></div><div class="ra"><button class="btn s d" onclick="dismissAlert(\''+esc(a.id)+'\')">&#215;</button></div></div>';}).join("")+(al.length>3?'<p style="font-size:12px;color:#8898b0;margin:8px 0 0">+'+(al.length-3)+" more</p>":""):esb("No active alerts."));
+  ht("peopleBox",ppl.length?ppl.map(function(p){return'<div class="dchip"><div class="dc"></div>Person&nbsp;'+(p.id||"?")+" &mdash; "+(p.distance!=null?p.distance+"m away":"detected")+"</div>";}).join(""):esb("No people detected by Nova."));
+  renderMap(gi("mapBox"),pts);renderMap(gi("fullMapBox"),pts);
+  var sdkOk=!!(status.robotSdk);
+  ht("robotDiagnostics",rRow(sdkOk?"green":"yellow","Robot SDK",sdkOk?"AgentOS connected":"No SDK connection detected")+rRow("blue","Map Points",pts.length+" point"+(pts.length!==1?"s":"")+" known")+rRow(s.camera?"green":"red","Camera Feed",s.camera?"Frame available":"No frame received"));
+  ht("detectionList",ppl.length?ppl.map(function(p){return'<div class="row"><div class="dot c-cyan" style="font-size:11px">&#9679;</div><div class="rb"><b>Person detected</b><span>'+(p.distance!=null?"Distance: "+p.distance+"m":"Position: x="+(p.x||"-")+", y="+(p.y||"-"))+"</span></div></div>";}).join(""):esb("No people currently in Nova's detection range."));
+  ht("roundResidents",res.length?res.map(function(r){return'<div class="row"><div class="dot c-blue">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+esc(r.room)+'</span></div><div class="ra"><button class="btn s p" onclick="checkInResident(\''+esc(r.id)+'\')">Check In</button><button class="btn s" onclick="medResident(\''+esc(r.id)+'\')">Med</button></div></div>';}).join(""):esb("Register residents to use care rounds."));
+  ht("roundSchedule",rem.length?rem.map(function(r){return rRow("green",r.timeLabel||"Scheduled",r.title||"Reminder");}).join(""):esb("No reminders from Nova."));
+  ht("residentDirectory",res.length?res.map(function(r){return'<div class="row"><div class="dot c-purple">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+esc(r.room+(r.wing?" &middot; "+r.wing:"")+(r.careLevel?" &mdash; "+r.careLevel:""))+'</span></div><div class="ra"><button class="btn s" onclick="editResident(\''+esc(r.id)+'\')">Edit</button><button class="btn s d" onclick="deleteResident(\''+esc(r.id)+'\')">Remove</button></div></div>';}).join(""):esb("No residents. Add one using the form."));
+  var rs=gi("residentSelect");if(rs)rs.innerHTML=res.length?res.map(function(r){return'<option value="'+esc(r.id)+'">'+esc(r.name)+" &mdash; Room "+esc(r.room)+"</option>";}).join(""):"<option disabled>No residents registered yet</option>";
+  ht("alertCenter",al.length?al.map(aCard).join(""):esb("No active alerts."));
+  var ps2=gi("pointSelect");if(ps2)ps2.innerHTML=pts.length?pts.map(function(p){return'<option value="'+esc(p.name)+'">'+esc(p.name)+"</option>";}).join(""):"<option disabled>No map points from Nova yet</option>";
+  var cLogs=c.logs||[];var eLogs=(s.events||[]).slice().reverse().map(function(e){return{createdAt:e.at,title:e.type,detail:typeof e.data==="object"?Object.keys(e.data||{}).slice(0,4).map(function(k){return k+": "+String(e.data[k]).slice(0,40);}).join(", "):String(e.data||"")};});
+  var logRows=cLogs.concat(eLogs);
+  ht("opsLog",(logRows.length?logRows:[{title:"Ready",detail:"Waiting for robot and facility activity."}]).slice(0,80).map(function(l){return'<tr><td style="width:75px;white-space:nowrap;color:#8898b0;font-size:12px">'+new Date(l.createdAt||Date.now()).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})+"</td><td style=\"font-weight:600;font-size:13px\">"+esc(l.title||"Event")+"</td><td style=\"font-size:12px;color:#5a6a80\">"+esc(String(l.detail||"").slice(0,140))+"</td></tr>";}).join(""));
+  var fh={resident_id:"Optional. Auto-generated if blank.",full_name:"Required.",room:"Required.",map_point:"Exact Nova map point name. Falls back to room.",wing:"Optional.",care_level:"Independent / Assisted / High.",primary_contact_name:"Optional.",primary_contact_phone:"Optional.",medication_notes:"Medication schedule.",mobility_notes:"Mobility aids and restrictions.",preferred_language:"Communication preference.",check_in_schedule:"e.g. daily 09:00",emergency_notes:"Critical staff notes."};
+  ht("formatRows",columns.map(function(col){return'<tr><td style="font-weight:700;font-size:12px;white-space:nowrap">'+col+'</td><td style="font-size:12px;color:#5a6a80">'+esc(fh[col]||"")+"</td></tr>";}).join(""));
+  ht("settingsRelay",rRow(s.online?"green":"red","Robot Connection",s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"Not connected")+rRow(s.camera?"green":"red","Camera Feed",s.camera?"Frame available":"No frame")+rRow("blue","Resident Registry",res.length+" registered"));
+  var cb=gi("cameraBox");var nc=gi("noCamera");var cam=gi("camera");var cn=gi("cameraNote");
+  if(s.camera){if(cb)cb.style.display="block";if(nc)nc.style.display="none";if(cam)cam.src="/api/camera.jpg?t="+Date.now();if(cn)cn.textContent="Live snapshot — updates every 2s";}
+  else{if(cb)cb.style.display="none";if(nc)nc.style.display="grid";}
 }
-async function refresh(){const s=await get("/api/state");if(s&&Object.keys(s).length)renderAll(s)}
+function refresh(){get("/api/state").then(function(s){if(s&&Object.keys(s).length)renderAll(s);});}
 setInterval(refresh,2000);refresh();loadUsers();
 document.querySelectorAll('.nav a[data-view]').forEach(function(a){
   a.addEventListener('click',function(e){e.preventDefault();sv(this.getAttribute('data-view'),this);});
