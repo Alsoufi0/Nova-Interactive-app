@@ -711,7 +711,7 @@ setInterval(refresh,2000);refresh();loadUsers();
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
-  if (url.pathname === "/health") return sendJson(res, 200, { ok: true });
+  if (url.pathname === "/health") return sendJson(res, 200, { ok: true, version: "v3" });
 
   if (url.pathname === "/login" && req.method === "GET") {
     if (currentUser(req) || isAdmin(req)) {
