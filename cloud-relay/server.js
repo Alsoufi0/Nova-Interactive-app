@@ -552,8 +552,9 @@ function sv(name,el){
   const view=document.getElementById("view-"+name);if(view)view.classList.add("active");
   document.querySelectorAll(".nav a").forEach(a=>a.classList.remove("active"));
   (el||document.querySelector('.nav a[data-view="'+name+'"]'))?.classList.add("active");
-  if(pageTitle)pageTitle.innerHTML=T[name]?.[0]||name;
-  if(pageSubtitle)pageSubtitle.innerHTML=T[name]?.[1]||"";
+  const pt=document.getElementById("pageTitle");const ps=document.getElementById("pageSubtitle");
+  if(pt)pt.innerHTML=T[name]?.[0]||name;
+  if(ps)ps.innerHTML=T[name]?.[1]||"";
 }
 function rRow(col,title,sub,right=""){return '<div class="row"><div class="dot c-'+col+'">'+esc(String(title||"?")[0])+'</div><div class="rb"><b>'+esc(title)+'</b><span>'+esc(sub)+'</span></div><div class="ra">'+right+'</div></div>'}
 function esb(t){return '<div class="esbox" style="min-height:70px">'+esc(t)+'</div>'}
