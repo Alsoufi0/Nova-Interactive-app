@@ -50,11 +50,12 @@ const DATA_FILE = path.join(__dirname, "nova_data.json");
   } catch(e) { if (e.code !== "ENOENT") console.error("[persist] load error:", e.message); }
 })();
 let _saveTimer = null;
+let lastSaved = 0;
 function persistData() {
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(function() {
     const snap = JSON.stringify({ residents: facility.residents, reminders: facility.reminders, alerts: facility.alerts, scheduledRounds: scheduledRounds, roundHistory: roundHistory, roundOrder: facility.roundOrder, checkIns: facility.checkIns, brandLogoDataUrl: brandLogoDataUrl });
-    fs.writeFile(DATA_FILE, snap, function(err) { if (err) console.error("[persist] save error:", err.message); });
+    fs.writeFile(DATA_FILE, snap, function(err) { if (err) console.error("[persist] save error:", err.message); else lastSaved = Date.now(); });
   }, 500);
 }
 
@@ -372,11 +373,11 @@ select.field{cursor:pointer}
 
 <section class="view active" id="view-command">
 <div class="g5">
-<button class="tile" onclick="goRounds()"><div class="ti c-green">&#8635;</div><span>Care Rounds</span><small>Build &amp; dispatch</small></button>
-<button class="tile" onclick="checkInSelected()"><div class="ti c-blue">&#10003;</div><span>Check-In</span><small>Selected resident</small></button>
-<button class="tile" onclick="medSelected()"><div class="ti c-yellow">&#9670;</div><span>Medication</span><small>Remind &amp; confirm</small></button>
-<button class="tile" onclick="staffAlert()"><div class="ti c-red">!</div><span>Staff Alert</span><small>Urgent notification</small></button>
-<button class="tile" onclick="guideSelected()"><div class="ti c-purple">&#8594;</div><span>Guide Visitor</span><small>Navigate to point</small></button>
+<button class="tile" onclick="goRounds()"><div class="ti c-green">&#8635;</div><span>Care Rounds</span><small>Build &amp; dispatch round</small></button>
+<button class="tile" onclick="cmdCheckIn()"><div class="ti c-blue">&#10003;</div><span>Check-In</span><small>Use selector below</small></button>
+<button class="tile" onclick="cmdMed()"><div class="ti c-yellow">&#9670;</div><span>Medication</span><small>Use selector below</small></button>
+<button class="tile" onclick="goAlerts()"><div class="ti c-red">!</div><span>Staff Alert</span><small>Create &amp; notify staff</small></button>
+<button class="tile" onclick="cmdGuide()"><div class="ti c-purple">&#8594;</div><span>Guide Visitor</span><small>Use selector below</small></button>
 </div>
 <div class="stats">
 <div class="stat"><span class="sl">Robot</span><b id="statRobot">—</b></div>
@@ -384,6 +385,34 @@ select.field{cursor:pointer}
 <div class="stat"><span class="sl">Map Points</span><b id="statPoints">—</b></div>
 <div class="stat"><span class="sl">People Seen</span><b id="statPeople">—</b></div>
 <div class="stat"><span class="sl">Camera</span><b id="statCamera">—</b></div>
+</div>
+<div id="quickActionsCard" class="card" style="margin-top:14px">
+<div class="ch">Quick Dispatch <span class="pill low" style="font-size:10px;margin-left:4px">Select a target then act</span></div>
+<div class="g2" style="gap:0">
+<div style="padding-right:18px;border-right:1px solid #f0f4fa">
+<label class="fl" style="margin-top:0">Resident</label>
+<select class="field" id="cmdResidentSelect" style="margin-bottom:6px"><option value="" disabled>No residents yet — add in Residents section</option></select>
+<div id="cmdResInfo" style="font-size:11px;color:#8898b0;margin-bottom:10px;min-height:14px"></div>
+<div style="display:flex;gap:6px;flex-wrap:wrap">
+<button class="btn p s" onclick="cmdCheckIn()">&#10003;&nbsp;Check-In</button>
+<button class="btn s" style="background:#fffbe8;border-color:#e8cc5a;color:#7a4500" onclick="cmdMed()">&#9670;&nbsp;Med Reminder</button>
+<button class="btn d s" onclick="cmdAlert()">!&nbsp;Alert Staff</button>
+</div>
+</div>
+<div style="padding-left:18px">
+<label class="fl" style="margin-top:0">Location</label>
+<select class="field" id="cmdPointSelect" style="margin-bottom:6px"><option value="" disabled>Waiting for Nova to connect...</option></select>
+<div style="font-size:11px;color:#8898b0;margin-bottom:10px">Send Nova to the selected map point.</div>
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+<button class="btn p s" onclick="cmdGuide()">&#8594;&nbsp;Guide Visitor</button>
+<button class="btn s" onclick="toggleCmdMsg()">Speak Message</button>
+</div>
+<div id="cmdMsgBox" style="display:none">
+<textarea class="field" id="cmdMessageText" rows="2" placeholder="Nova will speak this at the destination..." style="margin-top:0"></textarea>
+<button class="btn p s" style="margin-top:6px;width:100%;justify-content:center" onclick="cmdMsg()">&#9654;&nbsp;Send Message</button>
+</div>
+</div>
+</div>
 </div>
 <div class="g3" style="margin-top:14px">
 <div class="card"><div class="ch">Robot Status<div style="display:flex;gap:5px"><button class="btn s d" onclick="cmd('stop')">Stop</button><button class="btn s" onclick="cmd('charge')">Charge</button></div></div><div id="robotBox"></div></div>
@@ -534,8 +563,9 @@ select.field{cursor:pointer}
 </section>
 
 <section class="view" id="view-logs">
-<div class="card"><div class="ch">Operations Log</div>
-<table class="tbl"><thead><tr><th>Time</th><th>Event</th><th>Detail</th></tr></thead><tbody id="opsLog"></tbody></table>
+<div class="card">
+<div class="ch">Operations Log<span id="logCount" class="pill off" style="font-size:10px;margin-left:6px;display:none"></span></div>
+<div id="opsLog" style="max-height:600px;overflow-y:auto"></div>
 </div>
 </section>
 
@@ -729,21 +759,28 @@ function aCard(a){
   var u=a.priority!=="standard";
   return '<div class="ac'+(u?"":" std")+'"><div class="adot'+(u?"":" std")+'">'+(u?"!":"&#9650;")+'</div><div class="ab"><b>'+esc(a.message||"Alert")+'</b><span class="as">'+esc(a.room||"Facility")+" &middot; "+new Date(a.createdAt||Date.now()).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})+'</span></div><div class="aa"><button class="btn s d" onclick="dismissAlert(&#39;'+esc(a.id)+'&#39;)">Dismiss</button></div></div>';
 }
+function _buildFullOrder(){
+  var s=window._s;var all=(s&&s.care&&s.care.residents)||[];
+  var existing=window._roundOrder||[];
+  var full=existing.slice();
+  all.forEach(function(r){if(full.indexOf(r.id)<0)full.push(r.id);});
+  return{order:full,all:all};
+}
 function moveResidentUp(id){
-  var order=window._roundOrder||[];var idx=order.indexOf(id);
-  if(idx<=0)return;
+  var ob=_buildFullOrder();var order=ob.order;
+  var idx=order.indexOf(id);if(idx<=0)return;
   var tmp=order[idx-1];order[idx-1]=order[idx];order[idx]=tmp;
   window._roundOrder=order;
   fetch("/api/round-order",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({order:order})});
-  var s=window._s;renderRoundPicker((s&&s.care&&s.care.residents)||[]);
+  renderRoundPicker(ob.all);
 }
 function moveResidentDown(id){
-  var order=window._roundOrder||[];var idx=order.indexOf(id);
-  if(idx<0||idx>=order.length-1)return;
+  var ob=_buildFullOrder();var order=ob.order;
+  var idx=order.indexOf(id);if(idx<0||idx>=order.length-1)return;
   var tmp=order[idx+1];order[idx+1]=order[idx];order[idx]=tmp;
   window._roundOrder=order;
   fetch("/api/round-order",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({order:order})});
-  var s=window._s;renderRoundPicker((s&&s.care&&s.care.residents)||[]);
+  renderRoundPicker(ob.all);
 }
 function sortedResidents(res){
   var order=window._roundOrder||[];
@@ -780,6 +817,15 @@ function renderRoundPicker(res){
 function selectAllForRound(v){if(v===undefined)v=true;var cbs=document.querySelectorAll(".round-res-cb");for(var i=0;i<cbs.length;i++)cbs[i].checked=v;updateRoundSelCount();}
 function updateRoundSelCount(){var cbs=document.querySelectorAll(".round-res-cb");var total=cbs.length,checked=0;for(var i=0;i<cbs.length;i++){if(cbs[i].checked)checked++;}var el=document.getElementById("roundSelCount");if(el)el.textContent=total?"("+checked+" of "+total+")":"";}
 function goRounds(){var a=document.querySelector('.nav a[data-view="rounds"]');sv("rounds",a);}
+function goAlerts(){var a=document.querySelector('.nav a[data-view="alerts"]');sv("alerts",a);}
+function _cmdResId(){var el=document.getElementById("cmdResidentSelect");return el&&el.value||"";}
+function _cmdPt(){var el=document.getElementById("cmdPointSelect");return el&&el.value||"";}
+function cmdCheckIn(){var rid=_cmdResId();if(!rid)return notice("Select a resident in the Quick Dispatch panel first.",false);checkInResident(rid);}
+function cmdMed(){var rid=_cmdResId();if(!rid)return notice("Select a resident in the Quick Dispatch panel first.",false);medResident(rid);}
+function cmdAlert(){var rid=_cmdResId();var r=byId(rid)||{};cmd("staff_alert",{priority:"urgent",residentId:rid,room:r.room||"",message:"Staff assistance requested"+(r.name?" for "+r.name:".")});}
+function cmdGuide(){var p=_cmdPt();if(!p)return notice("Select a location in the Quick Dispatch panel first.",false);cmd("visitor_guide",{destination:p});}
+function cmdMsg(){var p=_cmdPt();if(!p)return notice("Select a location in the Quick Dispatch panel first.",false);var mt=document.getElementById("cmdMessageText");var msg=(mt&&mt.value.trim())||"Please meet Nova here.";cmd("message",{destination:p,message:msg});if(mt)mt.value="";}
+function toggleCmdMsg(){var b=document.getElementById("cmdMsgBox");if(b)b.style.display=b.style.display==="none"?"block":"none";}
 function startRound(){
   var typeEl=document.getElementById("roundType");var roundType=typeEl?typeEl.value:"checkin";
   var cbs=document.querySelectorAll(".round-res-cb");var selected=[];
@@ -974,15 +1020,27 @@ function renderAll(s){
   renderSchedules(s.scheduledRounds||[]);
   renderRoundHistory(s.roundHistory||[]);
   renderResidentDirectory(res,checkIns);
-  var rs=gi("residentSelect");if(rs)rs.innerHTML=res.length?res.map(function(r){return'<option value="'+esc(r.id)+'">'+esc(r.name)+" &mdash; Room "+esc(r.room)+"</option>";}).join(""):"<option disabled>No residents registered yet</option>";
+  var rs=gi("residentSelect");var rsV=rs&&rs.value;
+  if(rs)rs.innerHTML=res.length?res.map(function(r){return'<option value="'+esc(r.id)+'">'+esc(r.name)+" — Room "+esc(r.room)+"</option>";}).join(""):"<option disabled>No residents registered yet</option>";
+  if(rs&&rsV){rs.value=rsV;}
   renderAlertCenter(al);
   var ps2=gi("pointSelect");if(ps2)ps2.innerHTML=pts.length?pts.map(function(p){return'<option value="'+esc(p.name)+'">'+esc(p.name)+"</option>";}).join(""):"<option disabled>No map points from Nova yet</option>";
+  var crs=gi("cmdResidentSelect");var crsV=crs&&crs.value;
+  if(crs)crs.innerHTML=res.length?res.map(function(r){return'<option value="'+esc(r.id)+'">'+esc(r.name)+" — Room "+esc(r.room)+"</option>";}).join(""):"<option value='' disabled>No residents yet — add in Residents section</option>";
+  if(crs&&crsV){crs.value=crsV;}
+  var cri=gi("cmdResInfo");if(cri){var crId=crs&&crs.value;var cr=byId(crId);var lci2=cr&&checkIns[cr.id];cri.textContent=cr?("Room "+cr.room+(cr.careLevel?" · "+cr.careLevel:"")+(lci2?" · Last seen "+timeAgo(lci2):" · No check-in on record")):(res.length?"Select a resident above.":"");}
+  var cps=gi("cmdPointSelect");var cpsV=cps&&cps.value;
+  if(cps)cps.innerHTML=pts.length?pts.map(function(p){return'<option value="'+esc(p.name)+'">'+esc(p.name)+"</option>";}).join(""):"<option value='' disabled>Waiting for Nova to connect...</option>";
+  if(cps&&cpsV){cps.value=cpsV;}
   var cLogs=c.logs||[];var eLogs=(s.events||[]).map(function(e){return{createdAt:e.at,title:e.type,detail:typeof e.data==="object"?Object.keys(e.data||{}).slice(0,4).map(function(k){return k+": "+String(e.data[k]).slice(0,40);}).join(", "):String(e.data||"")};});
-  var logRows=cLogs.concat(eLogs).sort(function(a,b){return(b.createdAt||0)-(a.createdAt||0);});
-  ht("opsLog",(logRows.length?logRows:[{title:"Ready",detail:"Waiting for robot and facility activity."}]).slice(0,80).map(function(l){return'<tr><td style="width:75px;white-space:nowrap;color:#8898b0;font-size:12px">'+new Date(l.createdAt||Date.now()).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})+'</td><td style="font-weight:600;font-size:13px">'+esc(l.title||"Event")+'</td><td style="font-size:12px;color:#5a6a80">'+esc(String(l.detail||"").slice(0,140))+"</td></tr>";}).join(""));
+  var logRows=cLogs.concat(eLogs).filter(function(l){return l.title!=="state";}).sort(function(a,b){return(b.createdAt||0)-(a.createdAt||0);});
+  var lc2=gi("logCount");if(lc2){lc2.textContent=logRows.length+" entries";lc2.style.display=logRows.length?"inline-flex":"none";}
+  var LTITLE={"command":"Command sent","result":"Result received","resident":"Resident saved","resident_import":"CSV import","resident_deleted":"Resident removed","alert":"Alert created","alert_dismissed":"Alert dismissed","login":"Staff signed in","login_failed":"Sign-in failed","scheduled_round":"Scheduled round fired","queue_cleared":"Queue cleared","logo_updated":"Logo updated","user_created":"User created","schedule_created":"Schedule created","upsert_resident":"Resident synced to Nova","delete_resident":"Resident removed from Nova"};
+  var LMETA={"command":{ic:"&#9654;",cl:"blue"},"result":{ic:"&#10003;",cl:"green"},"resident":{ic:"&#9673;",cl:"purple"},"resident_import":{ic:"&#9673;",cl:"purple"},"resident_deleted":{ic:"&#9673;",cl:"red"},"alert":{ic:"!",cl:"red"},"alert_dismissed":{ic:"&#10003;",cl:"green"},"login":{ic:"&#9679;",cl:"cyan"},"login_failed":{ic:"&#10005;",cl:"red"},"scheduled_round":{ic:"&#8635;",cl:"green"},"queue_cleared":{ic:"&#9747;",cl:"yellow"},"logo_updated":{ic:"&#9998;",cl:"cyan"},"user_created":{ic:"&#9873;",cl:"blue"},"schedule_created":{ic:"&#8635;",cl:"blue"},"upsert_resident":{ic:"&#9673;",cl:"blue"},"delete_resident":{ic:"&#9673;",cl:"red"}};
+  ht("opsLog",logRows.length?logRows.slice(0,120).map(function(l){var m=LMETA[l.title]||{ic:"&#9679;",cl:"blue"};var dt=new Date(l.createdAt||Date.now());var diff=Date.now()-(l.createdAt||0);var ts=diff<3600000?timeAgo(l.createdAt):(diff<86400000?dt.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):dt.toLocaleDateString([],{month:"short",day:"numeric"})+" "+dt.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}));return'<div class="row"><div class="dot c-'+m.cl+'" style="font-size:12px;width:32px;height:32px;border-radius:8px">'+m.ic+'</div><div class="rb"><b>'+(LTITLE[l.title]||esc(l.title||"Event"))+'</b><span>'+esc(String(l.detail||"").slice(0,100))+'</span></div><div class="ra" style="font-size:11px;color:#a0b0c8;white-space:nowrap">'+ts+'</div></div>';}).join(""):esb("No activity logged yet. Connect Nova and start managing your facility."));
   var fh={resident_id:"Optional — auto-generated if blank.",full_name:"Required.",room:"Required.",map_point:"Exact Nova map point name.",wing:"Optional.",care_level:"Independent / Assisted / High.",primary_contact_name:"Optional.",primary_contact_phone:"Optional.",medication_notes:"Medication schedule.",mobility_notes:"Mobility aids and restrictions.",preferred_language:"Communication preference.",check_in_schedule:"e.g. daily 09:00",emergency_notes:"Critical staff notes."};
   ht("formatRows",columns.map(function(col){return'<tr><td style="font-weight:700;font-size:12px;white-space:nowrap">'+col+'</td><td style="font-size:12px;color:#5a6a80">'+esc(fh[col]||"")+"</td></tr>";}).join(""));
-  ht("settingsRelay",rRow(s.online?"green":"red","Robot Connection",s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"Not connected")+rRow(s.camera?"green":"red","Camera Feed",s.camera?"Active":"No frame")+rRow("blue","Residents",res.length+" registered")+rRow("purple","Schedules",(s.scheduledRounds||[]).length+" configured"));
+  ht("settingsRelay",rRow(s.online?"green":"red","Robot Connection",s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"Not connected")+rRow(s.camera?"green":"red","Camera Feed",s.camera?"Active":"No frame")+rRow("blue","Residents",res.length+" registered")+rRow("purple","Schedules",(s.scheduledRounds||[]).length+" configured")+rRow(s.lastSaved?"green":"yellow","Data Persistence",s.lastSaved?"Saved to disk "+timeAgo(s.lastSaved)+" &middot; Survives restart":"Not yet saved — make a change to trigger save"));
   var cb=gi("cameraBox");var nc=gi("noCamera");
   if(s.camera){if(cb)cb.style.display="block";if(nc)nc.style.display="none";updateCamera("/api/camera.jpg?t="+Date.now());}
   else{if(cb)cb.style.display="none";if(nc)nc.style.display="grid";}
@@ -1093,7 +1151,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === "/api/state") {
     const stale = Date.now() - robot.lastSeen > 15000;
-    return sendJson(res, 200, { ...robot, online: robot.online && !stale, care: mergedCare(), camera: !!robot.cameraJpegBase64, events, scheduledRounds, roundHistory, facility: { roundOrder: facility.roundOrder, checkIns: facility.checkIns } });
+    return sendJson(res, 200, { ...robot, online: robot.online && !stale, care: mergedCare(), camera: !!robot.cameraJpegBase64, events, scheduledRounds, roundHistory, facility: { roundOrder: facility.roundOrder, checkIns: facility.checkIns }, lastSaved });
   }
   if (url.pathname === "/api/camera.jpg") {
     if (!robot.cameraJpegBase64) return sendText(res, 404, "No camera snapshot");
