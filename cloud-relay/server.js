@@ -886,9 +886,12 @@ function clearQueue(){
 function renderSchResidentPicker(res){
   var el=document.getElementById("schResPicker");if(!el)return;
   if(!res||!res.length){el.innerHTML='<div class="esbox" style="min-height:40px;font-size:12px">Add residents first.</div>';return;}
+  var prev={};var cbs=document.querySelectorAll(".sch-res-cb");var hasState=cbs.length>0;
+  for(var i=0;i<cbs.length;i++)prev[cbs[i].value]=cbs[i].checked;
   el.innerHTML=res.map(function(r){
+    var chk=hasState?(prev[r.id]===false?"":"checked"):"checked";
     return '<label class="sch-res-row">'+
-      '<input type="checkbox" class="sch-res-cb" value="'+esc(r.id)+'" checked style="width:14px;height:14px;accent-color:#1a68e0;flex-shrink:0">'+
+      '<input type="checkbox" class="sch-res-cb" value="'+esc(r.id)+'" '+chk+' style="width:14px;height:14px;accent-color:#1a68e0;flex-shrink:0">'+
       '<span style="font-weight:600;font-size:13px">'+esc(r.name)+'</span>'+
       '<span style="color:#8898b0;font-size:11px;margin-left:auto;flex-shrink:0">Room '+esc(r.room)+'</span>'+
     '</label>';
