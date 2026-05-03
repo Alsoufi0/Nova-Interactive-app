@@ -250,9 +250,11 @@ body{margin:0;background:#eef2f7;color:#111827;font-family:Inter,system-ui,-appl
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .card{background:white;border:1px solid #e5eaf3;border-radius:16px;padding:20px;box-shadow:0 1px 8px #1a2d4a08}
 .ch{font-size:11px;font-weight:700;color:#95a8be;text-transform:uppercase;letter-spacing:.9px;margin:0 0 14px;display:flex;align-items:center;justify-content:space-between}
-.tile{border:1px solid #e8edf5;border-radius:14px;min-height:110px;background:white;color:#111827;box-shadow:0 2px 14px #1e3a6808;font-weight:800;font-size:14px;cursor:pointer;padding:16px 10px;transition:transform .12s,box-shadow .12s,border-color .12s;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px}
-.tile:hover{transform:translateY(-2px);box-shadow:0 8px 24px #1e3a6818;border-color:#c8d8f0}
-.tile .ti{width:44px;height:44px;border-radius:11px;display:grid;place-items:center;color:white;font-size:18px;flex-shrink:0}
+.tile{border:1px solid #e8edf5;border-radius:14px;min-height:114px;background:white;color:#111827;box-shadow:0 2px 14px #1e3a6808;font-weight:800;font-size:13px;cursor:pointer;padding:16px 10px;transition:transform .12s,box-shadow .12s,border-color .12s;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;text-align:center;line-height:1.2}
+.tile:hover{transform:translateY(-3px);box-shadow:0 10px 28px #1e3a6820;border-color:#b8cef0}
+.tile small{font-size:10px;font-weight:500;color:#8898b0;display:block;margin-top:1px;line-height:1.3}
+.tile:hover small{color:#a0b4cc}
+.tile .ti{width:42px;height:42px;border-radius:11px;display:grid;place-items:center;color:white;font-size:18px;flex-shrink:0}
 .c-green{background:#1f9950}.c-blue{background:#1a68e0}.c-yellow{background:#d49600}.c-red{background:#d63b3b}.c-purple{background:#7848cc}.c-cyan{background:#0ab5cc}.c-orange{background:#d06a20}
 .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:14px}
 .stat{border:1px solid #e8edf5;border-radius:12px;padding:13px 12px;background:white}
@@ -275,10 +277,14 @@ body{margin:0;background:#eef2f7;color:#111827;font-family:Inter,system-ui,-appl
 .field{width:100%;border:1px solid #d5dde8;border-radius:10px;padding:10px 13px;margin:4px 0;font:inherit;font-size:14px;color:#111827;outline:none;transition:border-color .15s,box-shadow .15s;background:white}
 .field:focus{border-color:#1a68e0;box-shadow:0 0 0 3px #1a68e010}
 select.field{cursor:pointer}
-.map{height:240px;border-radius:13px;background:linear-gradient(145deg,#e6f0ff,#d0e3f5);border:1px solid #c8d8ee;position:relative;overflow:hidden}
-.map.empty,.esbox{display:grid;place-items:center;color:#8898b0;text-align:center;min-height:80px;border:1.5px dashed #c0d0e0;border-radius:12px;background:#f5f8fd;padding:18px;font-size:13px}
-.pin{position:absolute;width:28px;height:28px;border:0;border-radius:7px;display:grid;place-items:center;color:white;font-weight:900;cursor:pointer;font-size:11px;transition:transform .1s,box-shadow .1s}
-.pin:hover{transform:scale(1.18);box-shadow:0 4px 12px #0004}
+.map{border-radius:13px;min-height:60px}
+.esbox{display:grid;place-items:center;color:#8898b0;text-align:center;min-height:80px;border:1.5px dashed #c0d0e0;border-radius:12px;background:#f5f8fd;padding:18px;font-size:13px}
+.loc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;padding:2px 0}
+.loc-btn{background:#f0f5ff;border:1.5px solid #d0ddf5;border-radius:10px;padding:12px 8px;cursor:pointer;text-align:center;transition:all .13s;font:inherit;color:#1a2840;display:flex;flex-direction:column;align-items:center;gap:5px;position:relative;overflow:hidden;word-break:break-word}
+.loc-btn:hover{background:#1a68e0;color:white;border-color:#1a68e0;transform:translateY(-2px);box-shadow:0 6px 18px #1a68e030}
+.loc-btn.curr{background:#1f9950;color:white;border-color:#1f9950}
+.loc-btn .li{font-size:20px;line-height:1}
+.loc-btn .ln{font-size:11px;font-weight:700;line-height:1.3}
 .camera{display:none;margin-top:10px}.camera img{width:100%;max-height:300px;object-fit:contain;background:#060e1f;border-radius:10px}
 .tbl{width:100%;border-collapse:collapse}
 .tbl td,.tbl th{text-align:left;padding:9px 13px;border-bottom:1px solid #f0f4fa;font-size:13px;vertical-align:top}
@@ -317,7 +323,7 @@ select.field{cursor:pointer}
 .ripple-el{position:absolute;border-radius:50%;background:rgba(255,255,255,.28);transform:scale(0);animation:rippleAnim .52s linear;pointer-events:none}
 .live-dot{width:8px;height:8px;border-radius:50%;background:#e53e3e;display:inline-block;flex-shrink:0;box-shadow:0 0 0 0 rgba(229,62,62,.55);animation:livePulse 1.4s ease-in-out infinite}
 .cam-wrap{position:relative;width:100%;background:#060e1c;border-radius:12px;overflow:hidden;aspect-ratio:16/9}
-.cam-wrap img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity .38s}
+.cam-wrap img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;transition:opacity .38s}
 .cam-overlay{position:absolute;top:10px;left:10px;display:flex;align-items:center;gap:5px;pointer-events:none}
 .expand-btn{width:100%;background:none;border:0;border-top:1px solid #eef2f8;color:#1a68e0;font-size:12px;font-weight:700;padding:10px 0;cursor:pointer;text-align:center;letter-spacing:.1px;display:block;margin-top:4px}
 .expand-btn:hover{background:#f5f8ff;border-radius:0 0 10px 10px}
@@ -363,11 +369,11 @@ select.field{cursor:pointer}
 
 <section class="view active" id="view-command">
 <div class="g5">
-<button class="tile" onclick="cmd('start_rounds')"><div class="ti c-green">&#8635;</div>Start Rounds</button>
-<button class="tile" onclick="checkInSelected()"><div class="ti c-blue">&#10003;</div>Check-In</button>
-<button class="tile" onclick="medSelected()"><div class="ti c-yellow">&#9670;</div>Medication</button>
-<button class="tile" onclick="staffAlert()"><div class="ti c-red">!</div>Staff Alert</button>
-<button class="tile" onclick="guideSelected()"><div class="ti c-purple">&#8594;</div>Guide Visitor</button>
+<button class="tile" onclick="goRounds()"><div class="ti c-green">&#8635;</div><span>Care Rounds</span><small>Build &amp; dispatch</small></button>
+<button class="tile" onclick="checkInSelected()"><div class="ti c-blue">&#10003;</div><span>Check-In</span><small>Selected resident</small></button>
+<button class="tile" onclick="medSelected()"><div class="ti c-yellow">&#9670;</div><span>Medication</span><small>Remind &amp; confirm</small></button>
+<button class="tile" onclick="staffAlert()"><div class="ti c-red">!</div><span>Staff Alert</span><small>Urgent notification</small></button>
+<button class="tile" onclick="guideSelected()"><div class="ti c-purple">&#8594;</div><span>Guide Visitor</span><small>Navigate to point</small></button>
 </div>
 <div class="stats">
 <div class="stat"><span class="sl">Robot</span><b id="statRobot">—</b></div>
@@ -383,7 +389,7 @@ select.field{cursor:pointer}
 </div>
 <div class="g3" style="margin-top:14px">
 <div class="card"><div class="ch">People Detection</div><div id="peopleBox"></div></div>
-<div class="card"><div class="ch">Map</div><div class="map" id="mapBox"></div></div>
+<div class="card"><div class="ch">Locations<span id="locCount" class="pill low" style="display:none"></span></div><div id="mapBox" style="max-height:210px;overflow-y:auto"></div></div>
 <div class="card"><div class="ch">Camera<div style="display:flex;gap:5px"><button class="btn s p" onclick="cmd(&#39;camera_start&#39;)">Live</button><button class="btn s" onclick="cmd(&#39;camera_stop&#39;)">Close</button></div></div><div id="cameraBox" style="display:none;margin-top:2px"><div class="cam-wrap"><img id="camera" alt="Nova" style="opacity:1"><img id="camera2" alt="" aria-hidden="true" style="opacity:0"><div class="cam-overlay"><span class="live-dot"></span><span style="color:white;font-size:10px;font-weight:800;letter-spacing:1.5px;text-shadow:0 1px 4px #000c">LIVE</span></div><div id="camTs" style="position:absolute;bottom:9px;right:10px;color:rgba(255,255,255,.78);font-size:11px;font-weight:600;text-shadow:0 1px 4px #000a;pointer-events:none"></div><button onclick="camFs()" title="Fullscreen" style="position:absolute;bottom:8px;left:10px;background:rgba(0,0,0,.48);border:0;color:white;border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer;line-height:1.4;transition:background .12s">&#x26F6;</button></div></div><div id="noCamera" class="esbox" style="min-height:70px">No camera feed from Nova.</div></div>
 </div>
 <div class="card" style="margin-top:14px"><div class="ch">Pending Command Queue<div style="display:flex;gap:6px;align-items:center"><span id="queueCount" class="pill off">0 pending</span><button class="btn s d" onclick="clearQueue()">Clear</button></div></div><div id="queueList"></div></div>
@@ -510,7 +516,7 @@ select.field{cursor:pointer}
 
 <section class="view" id="view-map">
 <div class="g2">
-<div class="card"><div class="ch">Live Map</div><div class="map" id="fullMapBox"></div><p style="font-size:12px;color:#8898b0;margin:8px 0 0">Click any pin to send Nova to that location.</p></div>
+<div class="card"><div class="ch">Map Points<span id="locCountFull" class="pill low" style="display:none;margin-left:6px"></span></div><div id="fullMapBox"></div><p style="font-size:12px;color:#8898b0;margin:8px 0 0">Tap a location to send Nova there. Active destination highlighted in green.</p></div>
 <div class="card">
 <div class="ch">Destination Control</div>
 <label class="fl">Map Point</label><select class="field" id="pointSelect"></select>
@@ -694,14 +700,24 @@ function loadUsers(){
 }
 function renderMap(target,points){
   if(!target)return;
-  if(!points.length){target.className="map empty";target.innerHTML='<div style="font-size:13px;color:#8898b0;text-align:center">No map points from Nova yet.</div>';return;}
-  target.className="map";
-  var cols=["c-blue","c-green","c-purple","c-cyan","c-orange"];
-  target.innerHTML=points.slice(0,10).map(function(p,i){
-    var l=(8+(i*19)%72)+"%";var t=(12+(i*27)%66)+"%";
-    return '<button class="pin '+cols[i%cols.length]+'" title="'+esc(p.name)+'" style="left:'+l+';top:'+t+'" onclick="cmd(&#39;visitor_guide&#39;,{destination:&#39;'+esc(p.name)+'&#39;})">'+esc(String(i+1))+'</button>'+
-           '<div style="position:absolute;left:calc('+l+' + 32px);top:calc('+t+' + 4px);font-size:10px;font-weight:700;color:#1a3058;background:white;border-radius:4px;padding:2px 5px;pointer-events:none;white-space:nowrap;max-width:72px;overflow:hidden;text-overflow:ellipsis">'+esc(p.name)+'</div>';
-  }).join("");
+  var lc=document.getElementById("locCount"),lcf=document.getElementById("locCountFull");
+  if(!points.length){
+    target.innerHTML=esb("No locations yet. Connect Nova to populate map points.");
+    if(lc)lc.style.display="none";if(lcf)lcf.style.display="none";
+    return;
+  }
+  var dest=(window._s&&window._s.status&&window._s.status.destination)||"";
+  var label=points.length+" location"+(points.length!==1?"s":"");
+  if(lc){lc.textContent=label;lc.style.display="inline-flex";}
+  if(lcf){lcf.textContent=label;lcf.style.display="inline-flex";}
+  target.innerHTML='<div class="loc-grid">'+points.map(function(p){
+    var active=dest&&p.name.toLowerCase()===dest.toLowerCase();
+    return '<button class="loc-btn'+(active?" curr":"")+'" onclick="cmd(&#39;visitor_guide&#39;,{destination:&#39;'+esc(p.name)+'&#39;})" title="Send Nova to '+esc(p.name)+'">'+
+      '<span class="li">&#9685;</span>'+
+      '<span class="ln">'+esc(p.name)+'</span>'+
+      (active?'<span style="font-size:9px;font-weight:700;letter-spacing:.5px;opacity:.85">HERE</span>':'')+
+    '</button>';
+  }).join('')+'</div>';
 }
 function aCard(a){
   var u=a.priority!=="standard";
@@ -920,7 +936,8 @@ function renderAll(s){
   function ht(id,v){var e=gi(id);if(e)e.innerHTML=v;}
   st("statRobot",s.online?"Online":"Offline");st("statResidents",res.length);st("statPoints",pts.length);st("statPeople",ppl.length);st("statCamera",s.camera?"Active":"Off");
   var so=gi("sideOnline");if(so){so.textContent=(s.online?"1":"0")+" / 1";so.className="pill "+(s.online?"ok":"off");}
-  st("sideHealth",s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"}):"Waiting for robot connection");
+  var shParts=[];if(s.online){shParts.push("Last seen "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"}));if(bat)shParts.push("Battery: "+bat);if(dest)shParts.push("At: "+dest);}
+  st("sideHealth",s.online?shParts.join(" &middot; "):"Waiting for robot connection");
   var op=gi("onlinePill");if(op){op.textContent=s.online?"Online":"Offline";op.className="pill "+(s.online?"ok":"off");}
   var ac=gi("alertCount");if(ac){if(al.length){ac.style.display="inline-flex";ac.textContent=al.length+" alert"+(al.length===1?"":"s");ac.className="pill bad";}else ac.style.display="none";}
   var status=s.status||{};
@@ -936,7 +953,6 @@ function renderAll(s){
   ht("detectionList",ppl.length?ppl.map(function(p){return'<div class="row"><div class="dot c-cyan" style="font-size:11px">&#9679;</div><div class="rb"><b>Person detected</b><span>'+(p.distance!=null?"Distance: "+p.distance+"m":"x="+(p.x||"-")+", y="+(p.y||"-"))+"</span></div></div>";}).join(""):esb("No people in Nova's detection range."));
   var checkIns=(s.facility&&s.facility.checkIns)||{};
   ht("roundResidents",res.length?res.map(function(r){var lastCI=checkIns[r.id];var lastStr=lastCI?timeAgo(lastCI):"Never";return'<div class="row"><div class="dot c-blue">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>Room '+esc(r.room)+' &middot; Last check-in: '+lastStr+'</span></div><div class="ra"><button class="btn s p" onclick="checkInResident(&#39;'+esc(r.id)+'&#39;)">Check In</button><button class="btn s" onclick="medResident(&#39;'+esc(r.id)+'&#39;)">Med</button></div></div>';}).join(""):esb("Add residents to begin care rounds."));
-  ht("roundSchedule",rem.length?rem.map(function(r){return rRow("green",r.timeLabel||"Scheduled",r.title||"Reminder");}).join(""):esb("No reminders from Nova."));
   renderRoundPicker(res);
   renderSchResidentPicker(res);
   renderSchedules(s.scheduledRounds||[]);
@@ -957,9 +973,6 @@ function renderAll(s){
 }
 function refresh(){get("/api/state").then(function(s){if(s&&Object.keys(s).length)renderAll(s);});}
 setInterval(refresh,2000);setInterval(refreshQueue,4000);refresh();refreshQueue();loadUsers();
-document.querySelectorAll('.nav a[data-view]').forEach(function(a){
-  a.addEventListener('click',function(e){e.preventDefault();sv(this.getAttribute('data-view'),this);});
-});
 var _camFlip=false;
 function updateCamera(src){
   var a=document.getElementById("camera"),b=document.getElementById("camera2");
