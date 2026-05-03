@@ -1,5 +1,7 @@
 const http = require("http");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_USER = process.env.ADMIN_USER || "admin";
@@ -30,6 +32,31 @@ function verifyPassword(password, stored) {
   return safeEqual(passwordHash(password, salt).split(":")[1], hash);
 }
 users.set(ADMIN_USER, { username: ADMIN_USER, role: "admin", passwordHash: passwordHash(ADMIN_PASS), createdAt: Date.now() });
+
+const DATA_FILE = path.join(__dirname, "nova_data.json");
+(function loadPersistedData() {
+  try {
+    const raw = fs.readFileSync(DATA_FILE, "utf8");
+    const saved = JSON.parse(raw);
+    if (Array.isArray(saved.residents)) facility.residents = saved.residents;
+    if (Array.isArray(saved.reminders)) facility.reminders = saved.reminders;
+    if (Array.isArray(saved.alerts)) facility.alerts = saved.alerts;
+    if (Array.isArray(saved.scheduledRounds)) saved.scheduledRounds.forEach(function(s) { scheduledRounds.push(s); });
+    if (Array.isArray(saved.roundHistory)) saved.roundHistory.forEach(function(h) { roundHistory.push(h); });
+    if (Array.isArray(saved.roundOrder)) facility.roundOrder = saved.roundOrder;
+    if (saved.checkIns && typeof saved.checkIns === "object") facility.checkIns = saved.checkIns;
+    if (typeof saved.brandLogoDataUrl === "string" && saved.brandLogoDataUrl) brandLogoDataUrl = saved.brandLogoDataUrl;
+    console.log("[persist] loaded:", facility.residents.length, "residents,", scheduledRounds.length, "schedules");
+  } catch(e) { if (e.code !== "ENOENT") console.error("[persist] load error:", e.message); }
+})();
+let _saveTimer = null;
+function persistData() {
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(function() {
+    const snap = JSON.stringify({ residents: facility.residents, reminders: facility.reminders, alerts: facility.alerts, scheduledRounds: scheduledRounds, roundHistory: roundHistory, roundOrder: facility.roundOrder, checkIns: facility.checkIns, brandLogoDataUrl: brandLogoDataUrl });
+    fs.writeFile(DATA_FILE, snap, function(err) { if (err) console.error("[persist] save error:", err.message); });
+  }, 500);
+}
 
 const residentColumns = ["resident_id","full_name","room","map_point","wing","care_level","primary_contact_name","primary_contact_phone","medication_notes","mobility_notes","preferred_language","check_in_schedule","emergency_notes"];
 
@@ -164,13 +191,14 @@ setInterval(function () {
     }});
     roundHistory.unshift({ id: crypto.randomUUID(), name: s.name, type: s.type || "checkin", trigger: "schedule", count: residents.length, at: Date.now() });
     if (roundHistory.length > 30) roundHistory.pop();
+    persistData();
     log("scheduled_round", { schedule: s.name, residents: residents.length });
   });
 }, 60000);
 
 function loginPage(error = "") {
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZOX Robotics — Sign In</title><style>
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#0d5790,#05152b 55%,#020814);font-family:Inter,system-ui,sans-serif;color:white}.card{width:min(430px,92vw);background:#ffffff10;border:1px solid #ffffff26;border-radius:24px;padding:28px;box-shadow:0 24px 70px #0008}.logo{width:96px;height:96px;border-radius:26px;margin:0 auto 16px;background:#06172e;border:2px solid #10c6e7;display:grid;place-items:center;overflow:hidden}.logo img{width:100%;height:100%;object-fit:cover}.logo span{color:#1bd6ee;font-size:30px;font-weight:950}.tag{text-align:center;color:#31d7ef;font-size:11px;letter-spacing:2.4px;font-weight:900}.field{width:100%;border:1px solid #ffffff2e;background:#ffffff14;color:white;border-radius:14px;padding:14px;margin:8px 0;font:inherit}.btn{width:100%;border:0;border-radius:14px;background:#12bee5;color:#03162d;padding:14px;font-weight:950;margin-top:12px;cursor:pointer}.err{background:#ff4d4d26;color:#ffd6d6;border:1px solid #ff8a8a55;padding:10px;border-radius:12px;margin:12px 0}.muted{color:#bed0e3;font-size:13px;text-align:center}</style></head><body><form class="card" method="post" action="/login">
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#0d5790,#05152b 55%,#020814);font-family:Inter,system-ui,sans-serif;color:white}@keyframes si{from{opacity:0;transform:translateY(28px) scale(.97)}to{opacity:1;transform:none}}@keyframes logoSpin{0%{transform:scale(.6) rotate(-8deg);opacity:0}100%{transform:none;opacity:1}}.card{width:min(430px,92vw);background:#ffffff10;border:1px solid #ffffff26;border-radius:24px;padding:28px;box-shadow:0 24px 70px #0008;animation:si .45s cubic-bezier(.22,.68,0,1.2) both}.logo{width:96px;height:96px;border-radius:26px;margin:0 auto 16px;background:#06172e;border:2px solid #10c6e7;display:grid;place-items:center;overflow:hidden;animation:logoSpin .5s cubic-bezier(.22,.68,0,1.2) .08s both}.logo img{width:100%;height:100%;object-fit:cover}.logo span{color:#1bd6ee;font-size:30px;font-weight:950}.tag{text-align:center;color:#31d7ef;font-size:11px;letter-spacing:2.4px;font-weight:900}.field{width:100%;border:1px solid #ffffff2e;background:#ffffff14;color:white;border-radius:14px;padding:14px;margin:8px 0;font:inherit;transition:border-color .15s}.field:focus{outline:none;border-color:#18d0f0;box-shadow:0 0 0 3px rgba(24,208,240,.18)}.btn{width:100%;border:0;border-radius:14px;background:#12bee5;color:#03162d;padding:14px;font-weight:950;margin-top:12px;cursor:pointer;transition:transform .12s,box-shadow .12s}.btn:hover{box-shadow:0 4px 18px rgba(18,190,229,.45)}.btn:active{transform:scale(.96)}.err{background:#ff4d4d26;color:#ffd6d6;border:1px solid #ff8a8a55;padding:10px;border-radius:12px;margin:12px 0}.muted{color:#bed0e3;font-size:13px;text-align:center}</style></head><body><form class="card" method="post" action="/login">
 <div class="logo">${brandLogoDataUrl ? `<img src="${brandLogoDataUrl}" alt="ZOX">` : "<span>ZOX</span>"}</div><div class="tag">SMART ROBOTS. BETTER CARE.</div><h1 style="text-align:center;margin:14px 0 6px">Care Cloud Sign In</h1><p class="muted">Authorized clinic staff only.</p>${error ? `<div class="err">${cleanText(error)}</div>` : ""}
 <input class="field" name="username" placeholder="Username" autocomplete="username" autofocus><input class="field" name="password" placeholder="Password" type="password" autocomplete="current-password"><button class="btn">Sign In</button></form></body></html>`;
 }
@@ -237,8 +265,9 @@ body{margin:0;background:#eef2f7;color:#111827;font-family:Inter,system-ui,-appl
 .dot{width:36px;height:36px;border-radius:9px;display:grid;place-items:center;color:white;font-weight:800;flex-shrink:0;font-size:14px}
 .rb{flex:1;min-width:0}.rb b{display:block;font-size:13.5px;font-weight:700}.rb span{display:block;font-size:12px;color:#8898b0;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ra{display:flex;gap:4px;flex-shrink:0;align-items:center}
-.btn{border:1px solid #d5dde8;background:white;color:#1a2840;border-radius:999px;padding:8px 16px;font-weight:700;font-size:13px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:5px;transition:all .12s;white-space:nowrap}
+.btn{border:1px solid #d5dde8;background:white;color:#1a2840;border-radius:999px;padding:8px 16px;font-weight:700;font-size:13px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:5px;transition:all .13s;white-space:nowrap;position:relative;overflow:hidden}
 .btn:hover{background:#f0f5fc;border-color:#b8c8de}
+.btn:active{transform:scale(.94)}
 .btn.p{background:#1a68e0;color:white;border-color:#1a68e0}.btn.p:hover{background:#155ac4}
 .btn.d{background:#d63b3b;color:white;border-color:#d63b3b}.btn.d:hover{background:#be3232}
 .btn.s{padding:5px 12px;font-size:12px}
@@ -255,7 +284,8 @@ select.field{cursor:pointer}
 .tbl td,.tbl th{text-align:left;padding:9px 13px;border-bottom:1px solid #f0f4fa;font-size:13px;vertical-align:top}
 .tbl th{font-size:11px;font-weight:700;color:#8898b0;text-transform:uppercase;letter-spacing:.5px;background:#fafbfd}
 .tbl tr:last-child td{border-bottom:0}
-.toast{position:fixed;right:20px;bottom:24px;background:#0d1f3c;color:white;padding:13px 18px;border-radius:12px;box-shadow:0 8px 30px #00000030;display:none;font-weight:600;font-size:14px;z-index:200;max-width:320px}
+.toast{position:fixed;right:20px;bottom:24px;background:#0d1f3c;color:white;padding:13px 18px;border-radius:12px;box-shadow:0 8px 30px #00000030;font-weight:600;font-size:14px;z-index:200;max-width:320px;opacity:0;transform:translateY(16px);transition:opacity .22s,transform .22s;pointer-events:none}
+.toast.show{opacity:1;transform:none;pointer-events:auto}
 .lp{width:90px;height:90px;border-radius:14px;border:2px solid #18d0f0;background:#06172e;object-fit:cover;display:block;margin:8px 0}
 .fbox{background:#f5f8fd;border:1px solid #e5eaf3;border-radius:12px;padding:14px;margin-bottom:12px}
 .fl{font-size:11px;font-weight:700;color:#6878a0;text-transform:uppercase;letter-spacing:.5px;display:block;margin:8px 0 3px}
@@ -278,6 +308,17 @@ select.field{cursor:pointer}
 .res-row:last-child{border-bottom:0}
 .round-num{width:20px;height:20px;border-radius:50%;background:#e8f0fc;color:#1a68e0;font-size:11px;font-weight:800;display:grid;place-items:center;flex-shrink:0}
 @media(max-width:960px){.app{display:block}.side{display:none}.top{position:static;height:auto;padding:14px;flex-direction:column;gap:8px;align-items:flex-start}.g5,.g3,.g3t,.g2,.stats{grid-template-columns:1fr}.content{padding:12px}}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+@keyframes rippleAnim{to{transform:scale(5);opacity:0}}
+@keyframes livePulse{0%,100%{box-shadow:0 0 0 0 rgba(229,62,62,.55)}70%{box-shadow:0 0 0 9px rgba(229,62,62,0)}}
+@keyframes slideIn{from{opacity:0;transform:translateY(22px) scale(.97)}to{opacity:1;transform:none}}
+.view.active{animation:fadeInUp .26s cubic-bezier(.22,.68,0,1) both}
+.tile{position:relative;overflow:hidden}.tile:active{transform:translateY(-2px) scale(.97)}
+.ripple-el{position:absolute;border-radius:50%;background:rgba(255,255,255,.28);transform:scale(0);animation:rippleAnim .52s linear;pointer-events:none}
+.live-dot{width:8px;height:8px;border-radius:50%;background:#e53e3e;display:inline-block;flex-shrink:0;box-shadow:0 0 0 0 rgba(229,62,62,.55);animation:livePulse 1.4s ease-in-out infinite}
+.cam-wrap{position:relative;width:100%;background:#060e1c;border-radius:12px;overflow:hidden;aspect-ratio:16/9}
+.cam-wrap img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity .38s}
+.cam-overlay{position:absolute;top:10px;left:10px;display:flex;align-items:center;gap:5px;pointer-events:none}
 </style></head><body><div class="app">
 <aside class="side">
 <div class="brand">
@@ -337,7 +378,7 @@ select.field{cursor:pointer}
 <div class="g3" style="margin-top:14px">
 <div class="card"><div class="ch">People Detection</div><div id="peopleBox"></div></div>
 <div class="card"><div class="ch">Map</div><div class="map" id="mapBox"></div></div>
-<div class="card"><div class="ch">Camera<div style="display:flex;gap:5px"><button class="btn s p" onclick="cmd('camera_start')">Open</button><button class="btn s" onclick="cmd('camera_stop')">Close</button></div></div><div class="camera" id="cameraBox"><img id="camera" alt="Nova camera"><p style="font-size:12px;color:#8898b0;margin:6px 0 0" id="cameraNote"></p></div><div id="noCamera" class="esbox" style="min-height:70px">No camera feed from Nova.</div></div>
+<div class="card"><div class="ch">Camera<div style="display:flex;gap:5px"><button class="btn s p" onclick="cmd(&#39;camera_start&#39;)">Live</button><button class="btn s" onclick="cmd(&#39;camera_stop&#39;)">Close</button></div></div><div id="cameraBox" style="display:none;margin-top:2px"><div class="cam-wrap"><img id="camera" alt="Nova" style="opacity:1"><img id="camera2" alt="" aria-hidden="true" style="opacity:0"><div class="cam-overlay"><span class="live-dot"></span><span style="color:white;font-size:10px;font-weight:800;letter-spacing:1.5px;text-shadow:0 1px 4px #000c">LIVE</span></div><div id="camTs" style="position:absolute;bottom:9px;right:10px;color:rgba(255,255,255,.78);font-size:11px;font-weight:600;text-shadow:0 1px 4px #000a;pointer-events:none"></div><button onclick="camFs()" title="Fullscreen" style="position:absolute;bottom:8px;left:10px;background:rgba(0,0,0,.48);border:0;color:white;border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer;line-height:1.4;transition:background .12s">&#x26F6;</button></div></div><div id="noCamera" class="esbox" style="min-height:70px">No camera feed from Nova.</div></div>
 </div>
 <div class="card" style="margin-top:14px"><div class="ch">Pending Command Queue<div style="display:flex;gap:6px;align-items:center"><span id="queueCount" class="pill off">0 pending</span><button class="btn s d" onclick="clearQueue()">Clear</button></div></div><div id="queueList"></div></div>
 </section>
@@ -516,7 +557,7 @@ function get(p){return fetch(p,{cache:"no-store"}).then(function(r){return r.ok?
 function post(p,b){return fetch(p,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b)}).then(function(r){return r.json();}).catch(function(){return{ok:false,error:"Network error"};})}
 function cmd(action,params){params=params||{};post("/api/command",{action:action,params:params}).then(function(out){notice(out.ok?"Command sent to Nova":"Error: "+(out.error||"failed"),out.ok);refresh();});}
 function esc(v){var map={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};return String(v||"").replace(/[&<>"']/g,function(c){return map[c];});}
-function notice(t,ok){if(ok===undefined)ok=true;var el=document.getElementById("toast");if(!el)return;el.textContent=t;el.style.background=ok?"#0d1f3c":"#7a1c1c";el.style.display="block";clearTimeout(notice._t);notice._t=setTimeout(function(){el.style.display="none";},3500);}
+function notice(t,ok){if(ok===undefined)ok=true;var el=document.getElementById("toast");if(!el)return;el.textContent=t;el.style.background=ok?"#0d1f3c":"#7a1c1c";el.className="toast show";clearTimeout(notice._t);notice._t=setTimeout(function(){el.className="toast";},3500);}
 function sv(name,el){
   var views=document.querySelectorAll(".view");
   for(var i=0;i<views.length;i++){views[i].classList.remove("active");views[i].classList.add("hidden");}
@@ -818,14 +859,52 @@ function renderAll(s){
   var fh={resident_id:"Optional — auto-generated if blank.",full_name:"Required.",room:"Required.",map_point:"Exact Nova map point name.",wing:"Optional.",care_level:"Independent / Assisted / High.",primary_contact_name:"Optional.",primary_contact_phone:"Optional.",medication_notes:"Medication schedule.",mobility_notes:"Mobility aids and restrictions.",preferred_language:"Communication preference.",check_in_schedule:"e.g. daily 09:00",emergency_notes:"Critical staff notes."};
   ht("formatRows",columns.map(function(col){return'<tr><td style="font-weight:700;font-size:12px;white-space:nowrap">'+col+'</td><td style="font-size:12px;color:#5a6a80">'+esc(fh[col]||"")+"</td></tr>";}).join(""));
   ht("settingsRelay",rRow(s.online?"green":"red","Robot Connection",s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"Not connected")+rRow(s.camera?"green":"red","Camera Feed",s.camera?"Active":"No frame")+rRow("blue","Residents",res.length+" registered")+rRow("purple","Schedules",(s.scheduledRounds||[]).length+" configured"));
-  var cb=gi("cameraBox");var nc=gi("noCamera");var cam=gi("camera");var cn=gi("cameraNote");
-  if(s.camera){if(cb)cb.style.display="block";if(nc)nc.style.display="none";if(cam)cam.src="/api/camera.jpg?t="+Date.now();if(cn)cn.textContent="Live snapshot — updates every 2s";}
+  var cb=gi("cameraBox");var nc=gi("noCamera");
+  if(s.camera){if(cb)cb.style.display="block";if(nc)nc.style.display="none";updateCamera("/api/camera.jpg?t="+Date.now());}
   else{if(cb)cb.style.display="none";if(nc)nc.style.display="grid";}
 }
 function refresh(){get("/api/state").then(function(s){if(s&&Object.keys(s).length)renderAll(s);});}
 setInterval(refresh,2000);setInterval(refreshQueue,4000);refresh();refreshQueue();loadUsers();
 document.querySelectorAll('.nav a[data-view]').forEach(function(a){
   a.addEventListener('click',function(e){e.preventDefault();sv(this.getAttribute('data-view'),this);});
+});
+var _camFlip=false;
+function updateCamera(src){
+  var a=document.getElementById("camera"),b=document.getElementById("camera2");
+  if(!a||!b)return;
+  var next=_camFlip?a:b,prev=_camFlip?b:a;
+  next.onload=function(){next.style.opacity="1";prev.style.opacity="0";};
+  next.onerror=function(){next.style.opacity="0.3";};
+  next.src=src;
+  _camFlip=!_camFlip;
+  var ts=document.getElementById("camTs");
+  if(ts)ts.textContent=new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+}
+function camFs(){
+  var b=document.getElementById("cameraBox");
+  if(!b)return;
+  if(b.requestFullscreen)b.requestFullscreen();
+  else if(b.webkitRequestFullscreen)b.webkitRequestFullscreen();
+}
+setInterval(function(){
+  var cb=document.getElementById("cameraBox");
+  if(cb&&cb.style.display!=="none")updateCamera("/api/camera.jpg?t="+Date.now());
+},1500);
+document.addEventListener("click",function(e){
+  var el=e.target;
+  while(el&&el!==document.body){
+    if(el.classList&&(el.classList.contains("btn")||el.classList.contains("tile")||el.classList.contains("pin")))break;
+    el=el.parentNode;
+  }
+  if(!el||el===document.body)return;
+  var rect=el.getBoundingClientRect();
+  var size=Math.max(rect.width,rect.height)*2.2;
+  var x=e.clientX-rect.left-size/2,y=e.clientY-rect.top-size/2;
+  var rip=document.createElement("span");
+  rip.className="ripple-el";
+  rip.style.cssText="width:"+size+"px;height:"+size+"px;left:"+x+"px;top:"+y+"px;";
+  el.appendChild(rip);
+  setTimeout(function(){if(rip.parentNode)rip.parentNode.removeChild(rip);},580);
 });
 window.onerror=function(msg,src,line){notice('JS Error: '+msg+' (line '+line+')',false);return false;};
 </script></body></html>`;
@@ -873,11 +952,12 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/robot/result" && req.method === "POST") {
       const data = JSON.parse((await readBody(req)) || "{}");
       const p = data.params || {};
-      if (data.action === "resident_checkin" && p.residentId) facility.checkIns[p.residentId] = Date.now();
+      if (data.action === "resident_checkin" && p.residentId) { facility.checkIns[p.residentId] = Date.now(); persistData(); }
       if (data.action === "start_rounds" && Array.isArray(p.residents)) {
         p.residents.forEach(function(r) { if (r.id) facility.checkIns[r.id] = Date.now(); });
         roundHistory.unshift({ id: crypto.randomUUID(), name: p.scheduleName || "Manual Round", type: p.type || "checkin", trigger: p.scheduleName ? "schedule" : "manual", count: p.residents.length, at: Date.now() });
         if (roundHistory.length > 30) roundHistory.pop();
+        persistData();
       }
       log("result", data); return sendJson(res, 200, { ok: true });
     }
@@ -919,7 +999,7 @@ const server = http.createServer(async (req, res) => {
     const dataUrl = String(body.dataUrl || "");
     if (!/^data:image\/(png|jpg|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return sendJson(res, 400, { ok: false, error: "Upload PNG, JPG, or WEBP." });
     if (Buffer.byteLength(dataUrl) > 7_000_000) return sendJson(res, 413, { ok: false, error: "Logo too large." });
-    brandLogoDataUrl = dataUrl; log("logo_updated", { actor: actor.username });
+    brandLogoDataUrl = dataUrl; persistData(); log("logo_updated", { actor: actor.username });
     return sendJson(res, 200, { ok: true, logo: brandLogoDataUrl });
   }
   if (url.pathname === "/templates/residents.csv") {
@@ -935,7 +1015,7 @@ const server = http.createServer(async (req, res) => {
     if (idx >= 0) facility.residents[idx] = resident; else facility.residents.push(resident);
     facility.logs.push({ createdAt: Date.now(), title: "Resident saved", detail: `${resident.name} - ${resident.room}` });
     commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "upsert_resident", params: { id: resident.id, name: resident.name, room: resident.room, mapPoint: resident.mapPoint || resident.room, notes: [resident.medicationNotes, resident.mobilityNotes].filter(Boolean).join("; "), checkInPrompt: resident.checkInSchedule || `Hello ${resident.name}. I am checking in. Do you need anything?` } });
-    log("resident", { id: resident.id, name: resident.name }); return sendJson(res, 200, { ok: true, resident });
+    persistData(); log("resident", { id: resident.id, name: resident.name }); return sendJson(res, 200, { ok: true, resident });
   }
   if (url.pathname === "/api/residents/import" && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
@@ -946,7 +1026,7 @@ const server = http.createServer(async (req, res) => {
     rows.slice(1).forEach(cells => { const item = {}; header.forEach((k, i) => { item[k] = cells[i] || ""; }); const r = toResident(item); if (r) imported.push(r); });
     imported.forEach(r => { const idx = facility.residents.findIndex(x => x.id === r.id); if (idx >= 0) facility.residents[idx] = r; else facility.residents.push(r); });
     facility.logs.push({ createdAt: Date.now(), title: "Resident import", detail: `${imported.length} residents imported` });
-    log("resident_import", { count: imported.length }); return sendJson(res, 200, { ok: true, count: imported.length });
+    persistData(); log("resident_import", { count: imported.length }); return sendJson(res, 200, { ok: true, count: imported.length });
   }
   const resDeleteMatch = url.pathname.match(/^\/api\/residents\/([^/]+)$/);
   if (resDeleteMatch && req.method === "DELETE") {
@@ -957,7 +1037,7 @@ const server = http.createServer(async (req, res) => {
     const removed = facility.residents.splice(idx, 1)[0];
     facility.logs.push({ createdAt: Date.now(), title: "Resident removed", detail: `${removed.name} — ${removed.room}` });
     commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "delete_resident", params: { id: removed.id } });
-    log("resident_deleted", { id: removed.id, name: removed.name }); return sendJson(res, 200, { ok: true });
+    persistData(); log("resident_deleted", { id: removed.id, name: removed.name }); return sendJson(res, 200, { ok: true });
   }
   if (url.pathname === "/api/alerts" && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
@@ -966,7 +1046,7 @@ const server = http.createServer(async (req, res) => {
     facility.alerts.unshift(alert);
     facility.logs.push({ createdAt: Date.now(), title: "Alert created", detail: `${alert.room || "Facility"} - ${alert.message}` });
     commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "staff_alert", params: alert });
-    log("alert", alert); return sendJson(res, 200, { ok: true, alert });
+    persistData(); log("alert", alert); return sendJson(res, 200, { ok: true, alert });
   }
   const alertDismissMatch = url.pathname.match(/^\/api\/alerts\/([^/]+)\/dismiss$/);
   if (alertDismissMatch && req.method === "POST") {
@@ -975,7 +1055,7 @@ const server = http.createServer(async (req, res) => {
     const idx = facility.alerts.findIndex(a => a.id === alertId);
     if (idx >= 0) facility.alerts.splice(idx, 1);
     facility.logs.push({ createdAt: Date.now(), title: "Alert dismissed", detail: alertId });
-    log("alert_dismissed", { id: alertId }); return sendJson(res, 200, { ok: true });
+    persistData(); log("alert_dismissed", { id: alertId }); return sendJson(res, 200, { ok: true });
   }
   if (url.pathname === "/api/command" && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
@@ -994,7 +1074,7 @@ const server = http.createServer(async (req, res) => {
     const body = JSON.parse((await readBody(req)) || "{}");
     const name = cleanText(body.name); if (!name) return sendJson(res, 400, { ok: false, error: "name required" });
     const schedule = { id: crypto.randomUUID(), name, type: ["checkin","medication","full"].includes(body.type) ? body.type : "checkin", time: /^\d{2}:\d{2}$/.test(body.time || "") ? body.time : "09:00", days: body.days || "daily", residentIds: Array.isArray(body.residentIds) ? body.residentIds : [], enabled: true, createdAt: Date.now(), lastRun: null };
-    scheduledRounds.push(schedule); log("schedule_created", { name }); return sendJson(res, 200, { ok: true, schedule });
+    scheduledRounds.push(schedule); persistData(); log("schedule_created", { name }); return sendJson(res, 200, { ok: true, schedule });
   }
   const schedDeleteMatch = url.pathname.match(/^\/api\/schedules\/([^/]+)$/);
   if (schedDeleteMatch && req.method === "DELETE") {
@@ -1002,7 +1082,7 @@ const server = http.createServer(async (req, res) => {
     const id = decodeURIComponent(schedDeleteMatch[1]);
     const idx = scheduledRounds.findIndex(s => s.id === id);
     if (idx < 0) return sendJson(res, 404, { ok: false, error: "schedule not found" });
-    scheduledRounds.splice(idx, 1); return sendJson(res, 200, { ok: true });
+    scheduledRounds.splice(idx, 1); persistData(); return sendJson(res, 200, { ok: true });
   }
   const schedToggleMatch = url.pathname.match(/^\/api\/schedules\/([^/]+)\/toggle$/);
   if (schedToggleMatch && req.method === "POST") {
@@ -1010,12 +1090,12 @@ const server = http.createServer(async (req, res) => {
     const id = decodeURIComponent(schedToggleMatch[1]);
     const s = scheduledRounds.find(s => s.id === id);
     if (!s) return sendJson(res, 404, { ok: false, error: "schedule not found" });
-    s.enabled = !s.enabled; return sendJson(res, 200, { ok: true, enabled: s.enabled });
+    s.enabled = !s.enabled; persistData(); return sendJson(res, 200, { ok: true, enabled: s.enabled });
   }
   if (url.pathname === "/api/round-order" && req.method === "PUT") {
     if (!requireRole(req, res, "operator")) return;
     const body = JSON.parse((await readBody(req)) || "{}");
-    if (Array.isArray(body.order)) facility.roundOrder = body.order;
+    if (Array.isArray(body.order)) { facility.roundOrder = body.order; persistData(); }
     return sendJson(res, 200, { ok: true });
   }
   if (url.pathname === "/api/queue" && req.method === "GET") {
