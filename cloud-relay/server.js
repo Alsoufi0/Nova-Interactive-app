@@ -8,22 +8,12 @@ const ROBOT_TOKEN = process.env.ROBOT_TOKEN || "change-me-robot-token";
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex");
 
 let robot = {
-  online: false,
-  lastSeen: 0,
-  status: {},
-  detection: {},
-  people: [],
-  points: [],
-  care: { residents: [], reminders: [], alerts: [], logs: [] },
-  cameraJpegBase64: "",
+  online: false, lastSeen: 0, status: {}, detection: {}, people: [], points: [],
+  care: { residents: [], reminders: [], alerts: [], logs: [] }, cameraJpegBase64: "",
 };
-
-const facility = {
-  residents: [],
-  reminders: [],
-  alerts: [],
-  logs: [],
-};
+const facility = { residents: [], reminders: [], alerts: [], logs: [], roundOrder: [], checkIns: {} };
+const scheduledRounds = [];
+const roundHistory = [];
 const commandQueue = [];
 const events = [];
 const sessions = new Map();
@@ -34,205 +24,96 @@ function passwordHash(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.pbkdf2Sync(String(password || ""), salt, 120000, 32, "sha256").toString("hex");
   return `${salt}:${hash}`;
 }
-
 function verifyPassword(password, stored) {
   const [salt, hash] = String(stored || "").split(":");
   if (!salt || !hash) return false;
-  const candidate = passwordHash(password, salt).split(":")[1];
-  return safeEqual(candidate, hash);
+  return safeEqual(passwordHash(password, salt).split(":")[1], hash);
 }
+users.set(ADMIN_USER, { username: ADMIN_USER, role: "admin", passwordHash: passwordHash(ADMIN_PASS), createdAt: Date.now() });
 
-users.set(ADMIN_USER, {
-  username: ADMIN_USER,
-  role: "admin",
-  passwordHash: passwordHash(ADMIN_PASS),
-  createdAt: Date.now(),
-});
-
-const residentColumns = [
-  "resident_id",
-  "full_name",
-  "room",
-  "map_point",
-  "wing",
-  "care_level",
-  "primary_contact_name",
-  "primary_contact_phone",
-  "medication_notes",
-  "mobility_notes",
-  "preferred_language",
-  "check_in_schedule",
-  "emergency_notes",
-];
+const residentColumns = ["resident_id","full_name","room","map_point","wing","care_level","primary_contact_name","primary_contact_phone","medication_notes","mobility_notes","preferred_language","check_in_schedule","emergency_notes"];
 
 function sendJson(res, status, body) {
   const data = Buffer.from(JSON.stringify(body));
-  res.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    "content-length": data.length,
-  });
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "content-length": data.length });
   res.end(data);
 }
-
 function sendText(res, status, body, type = "text/plain; charset=utf-8") {
   const data = Buffer.from(body);
   res.writeHead(status, { "content-type": type, "cache-control": "no-store", "content-length": data.length });
   res.end(data);
 }
-
 function readBody(req) {
   return new Promise((resolve) => {
     const chunks = [];
-    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("data", (c) => chunks.push(c));
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
   });
 }
-
 function safeEqual(a, b) {
-  const left = Buffer.from(a || "");
-  const right = Buffer.from(b || "");
-  return left.length === right.length && crypto.timingSafeEqual(left, right);
+  const l = Buffer.from(a || ""), r = Buffer.from(b || "");
+  return l.length === r.length && crypto.timingSafeEqual(l, r);
 }
-
 function isAdmin(req) {
-  const header = req.headers.authorization || "";
-  if (!header.startsWith("Basic ")) return false;
-  const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
-  return safeEqual(decoded, `${ADMIN_USER}:${ADMIN_PASS}`);
+  const h = req.headers.authorization || "";
+  if (!h.startsWith("Basic ")) return false;
+  return safeEqual(Buffer.from(h.slice(6), "base64").toString("utf8"), `${ADMIN_USER}:${ADMIN_PASS}`);
 }
-
 function parseCookies(req) {
-  return Object.fromEntries(
-    String(req.headers.cookie || "")
-      .split(";")
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const idx = part.indexOf("=");
-        return idx < 0 ? [part, ""] : [part.slice(0, idx), decodeURIComponent(part.slice(idx + 1))];
-      })
-  );
+  return Object.fromEntries(String(req.headers.cookie || "").split(";").map(p => p.trim()).filter(Boolean).map(p => {
+    const i = p.indexOf("="); return i < 0 ? [p, ""] : [p.slice(0, i), decodeURIComponent(p.slice(i + 1))];
+  }));
 }
-
 function currentUser(req) {
   const sid = parseCookies(req).nova_session;
   const session = sid ? sessions.get(sid) : null;
-  if (!session || session.expiresAt < Date.now()) {
-    if (sid) sessions.delete(sid);
-    return null;
-  }
+  if (!session || session.expiresAt < Date.now()) { if (sid) sessions.delete(sid); return null; }
   return users.get(session.username) || null;
 }
-
 function createSession(res, username) {
   const sid = crypto.createHmac("sha256", SESSION_SECRET).update(`${username}:${crypto.randomUUID()}`).digest("hex");
-  sessions.set(sid, { username, createdAt: Date.now(), expiresAt: Date.now() + 1000 * 60 * 60 * 12 });
+  sessions.set(sid, { username, createdAt: Date.now(), expiresAt: Date.now() + 43200000 });
   res.setHeader("set-cookie", `nova_session=${encodeURIComponent(sid)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=43200`);
 }
-
-function isRobot(req) {
-  return safeEqual(req.headers["x-robot-token"], ROBOT_TOKEN);
-}
-
+function isRobot(req) { return safeEqual(req.headers["x-robot-token"], ROBOT_TOKEN); }
 function requireAdmin(req, res) {
   if (currentUser(req) || isAdmin(req)) return true;
   if (String(req.url || "").startsWith("/api/")) return sendJson(res, 401, { ok: false, error: "login required" });
-  res.writeHead(302, { location: "/login", "cache-control": "no-store" });
-  res.end();
-  return false;
+  res.writeHead(302, { location: "/login", "cache-control": "no-store" }); res.end(); return false;
 }
-
 function requireRole(req, res, role = "admin") {
   const user = currentUser(req);
   if (user?.role === role || user?.role === "admin" || isAdmin(req)) return user || users.get(ADMIN_USER);
-  sendJson(res, 403, { ok: false, error: "admin role required" });
-  return null;
+  sendJson(res, 403, { ok: false, error: "admin role required" }); return null;
 }
-
-function loginPage(error = "") {
-  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZOX Robotics — Sign In</title><style>
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#0d5790,#05152b 55%,#020814);font-family:Inter,system-ui,Segoe UI,sans-serif;color:white}.card{width:min(430px,92vw);background:#ffffff10;border:1px solid #ffffff26;border-radius:24px;padding:28px;box-shadow:0 24px 70px #0008}.logo{width:96px;height:96px;border-radius:26px;margin:0 auto 16px;background:#06172e;border:2px solid #10c6e7;display:grid;place-items:center;overflow:hidden}.logo img{width:100%;height:100%;object-fit:cover}.logo span{color:#1bd6ee;font-size:30px;font-weight:950}.tag{text-align:center;color:#31d7ef;font-size:11px;letter-spacing:2.4px;font-weight:900}.field{width:100%;border:1px solid #ffffff2e;background:#ffffff14;color:white;border-radius:14px;padding:14px;margin:8px 0;font:inherit}.btn{width:100%;border:0;border-radius:14px;background:#12bee5;color:#03162d;padding:14px;font-weight:950;margin-top:12px;cursor:pointer}.err{background:#ff4d4d26;color:#ffd6d6;border:1px solid #ff8a8a55;padding:10px;border-radius:12px;margin:12px 0}.muted{color:#bed0e3;font-size:13px;text-align:center}</style></head><body><form class="card" method="post" action="/login">
-<div class="logo">${brandLogoDataUrl ? `<img src="${brandLogoDataUrl}" alt="ZOX Robotics">` : "<span>ZOX</span>"}</div><div class="tag">SMART ROBOTS. BETTER CARE.</div><h1 style="text-align:center;margin:14px 0 6px">Care Cloud Sign In</h1><p class="muted">Authorized clinic staff only.</p>${error ? `<div class="err">${cleanText(error)}</div>` : ""}
-<input class="field" name="username" placeholder="Username" autocomplete="username" autofocus><input class="field" name="password" placeholder="Password" type="password" autocomplete="current-password"><button class="btn">Sign In</button></form></body></html>`;
-}
-
-function logoutPage() {
-  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signed Out</title><style>
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#0d5790,#05152b 55%,#020814);font-family:Inter,system-ui,Segoe UI,sans-serif;color:white}.card{width:min(430px,92vw);background:#ffffff10;border:1px solid #ffffff26;border-radius:24px;padding:28px;text-align:center;box-shadow:0 24px 70px #0008}.logo{width:96px;height:96px;border-radius:26px;margin:0 auto 16px;background:#06172e;border:2px solid #10c6e7;display:grid;place-items:center;overflow:hidden}.logo img{width:100%;height:100%;object-fit:cover}.logo span{color:#1bd6ee;font-size:30px;font-weight:950}.btn{display:inline-block;border:0;border-radius:14px;background:#12bee5;color:#03162d;padding:14px 22px;font-weight:950;margin-top:12px;text-decoration:none}.muted{color:#bed0e3;font-size:13px}</style></head><body><section class="card">
-<div class="logo">${brandLogoDataUrl ? `<img src="${brandLogoDataUrl}" alt="ZOX Robotics">` : "<span>ZOX</span>"}</div><h1>Signed Out</h1><p class="muted">Your Care Cloud session has ended on this device.</p><a class="btn" href="/login">Sign In Again</a></section></body></html>`;
-}
-
-function parseForm(body) {
-  return Object.fromEntries(
-    String(body || "").split("&").filter(Boolean).map((part) => {
-      const [key, value = ""] = part.split("=");
-      return [decodeURIComponent(key.replace(/\+/g, " ")), decodeURIComponent(value.replace(/\+/g, " "))];
-    })
-  );
-}
-
-function legacyAuthChallenge(res) {
-  res.writeHead(401, { "www-authenticate": 'Basic realm="Nova Cloud"', "cache-control": "no-store" });
-  res.end("Login required");
-}
-
-function log(type, detail = {}) {
-  events.push({ at: Date.now(), type, data: detail });
-  while (events.length > 200) events.shift();
-}
-
-function cleanText(value) {
-  return String(value || "").trim();
-}
-
+function log(type, detail = {}) { events.push({ at: Date.now(), type, data: detail }); while (events.length > 200) events.shift(); }
+function cleanText(v) { return String(v || "").trim(); }
 function stableId(prefix, value) {
   const base = cleanText(value) || crypto.randomUUID();
   return `${prefix}-${crypto.createHash("sha1").update(base).digest("hex").slice(0, 10)}`;
 }
-
 function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let cell = "";
-  let quoted = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    const next = text[i + 1];
-    if (quoted && ch === '"' && next === '"') {
-      cell += '"';
-      i += 1;
-    } else if (ch === '"') {
-      quoted = !quoted;
-    } else if (!quoted && ch === ",") {
-      row.push(cell);
-      cell = "";
-    } else if (!quoted && (ch === "\n" || ch === "\r")) {
-      if (ch === "\r" && next === "\n") i += 1;
-      row.push(cell);
-      if (row.some((v) => cleanText(v))) rows.push(row);
-      row = [];
-      cell = "";
-    } else {
-      cell += ch;
-    }
+  const rows = []; let row = [], cell = "", quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i], next = text[i + 1];
+    if (quoted && ch === '"' && next === '"') { cell += '"'; i++; }
+    else if (ch === '"') { quoted = !quoted; }
+    else if (!quoted && ch === ",") { row.push(cell); cell = ""; }
+    else if (!quoted && (ch === "\n" || ch === "\r")) {
+      if (ch === "\r" && next === "\n") i++;
+      row.push(cell); if (row.some(v => cleanText(v))) rows.push(row); row = []; cell = "";
+    } else { cell += ch; }
   }
-  row.push(cell);
-  if (row.some((v) => cleanText(v))) rows.push(row);
-  return rows;
+  row.push(cell); if (row.some(v => cleanText(v))) rows.push(row); return rows;
 }
-
 function toResident(input) {
-  const name = cleanText(input.full_name || input.name);
-  const room = cleanText(input.room);
+  const name = cleanText(input.full_name || input.name), room = cleanText(input.room);
   if (!name || !room) return null;
   return {
     id: cleanText(input.resident_id || input.id) || stableId("resident", `${name}:${room}`),
-    name,
-    room,
+    name, room,
     mapPoint: cleanText(input.map_point || input.mapPoint || input.room),
-    wing: cleanText(input.wing),
-    careLevel: cleanText(input.care_level || input.careLevel),
+    wing: cleanText(input.wing), careLevel: cleanText(input.care_level || input.careLevel),
     contactName: cleanText(input.primary_contact_name || input.contactName),
     contactPhone: cleanText(input.primary_contact_phone || input.contactPhone),
     medicationNotes: cleanText(input.medication_notes || input.medicationNotes),
@@ -243,25 +124,77 @@ function toResident(input) {
     updatedAt: Date.now(),
   };
 }
-
 function mergedCare() {
-  const robotCare = robot.care || {};
+  const rc = robot.care || {};
   return {
     residents: facility.residents,
-    reminders: [...facility.reminders, ...(Array.isArray(robotCare.reminders) ? robotCare.reminders : [])],
-    alerts: [...facility.alerts, ...(Array.isArray(robotCare.alerts) ? robotCare.alerts : [])],
-    logs: [...facility.logs, ...(Array.isArray(robotCare.logs) ? robotCare.logs : [])],
+    reminders: [...facility.reminders, ...(Array.isArray(rc.reminders) ? rc.reminders : [])],
+    alerts: [...facility.alerts, ...(Array.isArray(rc.alerts) ? rc.alerts : [])],
+    logs: [...facility.logs, ...(Array.isArray(rc.logs) ? rc.logs : [])],
   };
 }
 
+// Server-side schedule executor — fires every 60 seconds
+setInterval(function () {
+  const now = new Date();
+  const dayNames = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+  const today = dayNames[now.getDay()];
+  const hhmm = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+  scheduledRounds.forEach(function (s) {
+    if (!s.enabled) return;
+    const days = s.days;
+    const dayMatch = days === "daily"
+      || (Array.isArray(days) && days.includes(today))
+      || (days === "weekdays" && ["mon","tue","wed","thu","fri"].includes(today))
+      || (days === "weekends" && ["sat","sun"].includes(today));
+    if (!dayMatch || s.time !== hhmm) return;
+    const runKey = now.toDateString() + hhmm;
+    if (s.lastRun === runKey) return;
+    s.lastRun = runKey;
+    const base = facility.residents.slice().sort(function (a, b) {
+      const ia = facility.roundOrder.indexOf(a.id), ib = facility.roundOrder.indexOf(b.id);
+      if (ia >= 0 && ib >= 0) return ia - ib; if (ia >= 0) return -1; if (ib >= 0) return 1; return 0;
+    });
+    const residents = (Array.isArray(s.residentIds) && s.residentIds.length)
+      ? base.filter(r => s.residentIds.includes(r.id)) : base;
+    if (!residents.length) return;
+    commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "start_rounds", params: {
+      type: s.type || "checkin", scheduleName: s.name,
+      residents: residents.map(r => ({ id: r.id, name: r.name, room: r.room, mapPoint: r.mapPoint || r.room, checkInPrompt: r.checkInSchedule || "" }))
+    }});
+    roundHistory.unshift({ id: crypto.randomUUID(), name: s.name, type: s.type || "checkin", trigger: "schedule", count: residents.length, at: Date.now() });
+    if (roundHistory.length > 30) roundHistory.pop();
+    log("scheduled_round", { schedule: s.name, residents: residents.length });
+  });
+}, 60000);
+
+function loginPage(error = "") {
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZOX Robotics — Sign In</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#0d5790,#05152b 55%,#020814);font-family:Inter,system-ui,sans-serif;color:white}.card{width:min(430px,92vw);background:#ffffff10;border:1px solid #ffffff26;border-radius:24px;padding:28px;box-shadow:0 24px 70px #0008}.logo{width:96px;height:96px;border-radius:26px;margin:0 auto 16px;background:#06172e;border:2px solid #10c6e7;display:grid;place-items:center;overflow:hidden}.logo img{width:100%;height:100%;object-fit:cover}.logo span{color:#1bd6ee;font-size:30px;font-weight:950}.tag{text-align:center;color:#31d7ef;font-size:11px;letter-spacing:2.4px;font-weight:900}.field{width:100%;border:1px solid #ffffff2e;background:#ffffff14;color:white;border-radius:14px;padding:14px;margin:8px 0;font:inherit}.btn{width:100%;border:0;border-radius:14px;background:#12bee5;color:#03162d;padding:14px;font-weight:950;margin-top:12px;cursor:pointer}.err{background:#ff4d4d26;color:#ffd6d6;border:1px solid #ff8a8a55;padding:10px;border-radius:12px;margin:12px 0}.muted{color:#bed0e3;font-size:13px;text-align:center}</style></head><body><form class="card" method="post" action="/login">
+<div class="logo">${brandLogoDataUrl ? `<img src="${brandLogoDataUrl}" alt="ZOX">` : "<span>ZOX</span>"}</div><div class="tag">SMART ROBOTS. BETTER CARE.</div><h1 style="text-align:center;margin:14px 0 6px">Care Cloud Sign In</h1><p class="muted">Authorized clinic staff only.</p>${error ? `<div class="err">${cleanText(error)}</div>` : ""}
+<input class="field" name="username" placeholder="Username" autocomplete="username" autofocus><input class="field" name="password" placeholder="Password" type="password" autocomplete="current-password"><button class="btn">Sign In</button></form></body></html>`;
+}
+function logoutPage() {
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Signed Out</title><style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#0d5790,#05152b 55%,#020814);font-family:Inter,system-ui,sans-serif;color:white}.card{width:min(430px,92vw);background:#ffffff10;border:1px solid #ffffff26;border-radius:24px;padding:28px;text-align:center;box-shadow:0 24px 70px #0008}.logo{width:96px;height:96px;border-radius:26px;margin:0 auto 16px;background:#06172e;border:2px solid #10c6e7;display:grid;place-items:center;overflow:hidden}.logo img{width:100%;height:100%;object-fit:cover}.logo span{color:#1bd6ee;font-size:30px;font-weight:950}.btn{display:inline-block;border:0;border-radius:14px;background:#12bee5;color:#03162d;padding:14px 22px;font-weight:950;margin-top:12px;text-decoration:none}.muted{color:#bed0e3;font-size:13px}</style></head><body><section class="card">
+<div class="logo">${brandLogoDataUrl ? `<img src="${brandLogoDataUrl}" alt="ZOX">` : "<span>ZOX</span>"}</div><h1>Signed Out</h1><p class="muted">Your session has ended.</p><a class="btn" href="/login">Sign In Again</a></section></body></html>`;
+}
+function parseForm(body) {
+  return Object.fromEntries(String(body || "").split("&").filter(Boolean).map(p => {
+    const [k, v = ""] = p.split("=");
+    return [decodeURIComponent(k.replace(/\+/g, " ")), decodeURIComponent(v.replace(/\+/g, " "))];
+  }));
+}
+
 function page(user = users.get(ADMIN_USER)) {
+  const u = user || users.get(ADMIN_USER) || { username: ADMIN_USER, role: "admin" };
   return `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ZOX Robotics — Care Cloud</title>
 <style>
 *{box-sizing:border-box;-webkit-font-smoothing:antialiased}
 body{margin:0;background:#eef2f7;color:#111827;font-family:Inter,system-ui,-apple-system,sans-serif;font-size:14px}
 .app{display:grid;grid-template-columns:252px 1fr;min-height:100vh}
-.side{background:linear-gradient(175deg,#03132b 0%,#061f42 60%,#082a56 100%);color:white;padding:20px 14px;display:flex;flex-direction:column;gap:0;position:sticky;top:0;height:100vh;overflow-y:auto}
+.side{background:linear-gradient(175deg,#03132b 0%,#061f42 60%,#082a56 100%);color:white;padding:20px 14px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
 .brand{display:flex;gap:12px;align-items:center;padding-bottom:20px;border-bottom:1px solid #ffffff12;margin-bottom:16px}
 .logo{width:56px;height:56px;border-radius:13px;background:radial-gradient(circle at 40% 35%,#0e4a8a,#041428 70%);border:1.5px solid #18d0f0;box-shadow:0 0 18px #10c6e730;display:grid;place-items:center;color:#1bd6ee;font-weight:900;font-size:19px;overflow:hidden;flex-shrink:0}
 .logo img{width:100%;height:100%;object-fit:cover}
@@ -275,8 +208,8 @@ body{margin:0;background:#eef2f7;color:#111827;font-family:Inter,system-ui,-appl
 .sidebox{background:#ffffff08;border:1px solid #ffffff12;border-radius:12px;padding:13px;margin-top:12px}
 .sidebox .sbt{font-size:13px;font-weight:700;margin-bottom:3px;display:flex;justify-content:space-between;align-items:center}
 .sblabel{font-size:11px;color:#7fa8cc;margin-bottom:8px}
-.top{height:68px;background:white;border-bottom:1px solid #e5eaf3;display:flex;align-items:center;justify-content:space-between;padding:0 22px;position:sticky;top:0;z-index:10}
-.top h1{margin:0;font-size:18px;font-weight:800;letter-spacing:-.3px}
+.top{height:64px;background:white;border-bottom:1px solid #e5eaf3;display:flex;align-items:center;justify-content:space-between;padding:0 22px;position:sticky;top:0;z-index:10}
+.top h1{margin:0;font-size:17px;font-weight:800;letter-spacing:-.3px}
 .top .sub{font-size:12px;color:#8898b0;margin-top:2px}
 .topRight{display:flex;gap:8px;align-items:center}
 .content{padding:20px;flex:1}
@@ -284,27 +217,26 @@ body{margin:0;background:#eef2f7;color:#111827;font-family:Inter,system-ui,-appl
 #view-command{display:block}
 #view-command.hidden{display:none}
 .g5{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
-.g3{display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:14px;margin-top:14px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.g3t{display:grid;grid-template-columns:1.05fr 1fr 0.95fr;gap:14px}
 .g2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .card{background:white;border:1px solid #e5eaf3;border-radius:16px;padding:20px;box-shadow:0 1px 8px #1a2d4a08}
-.ch{font-size:11px;font-weight:700;color:#95a8be;text-transform:uppercase;letter-spacing:.9px;margin:0 0 16px;display:flex;align-items:center;justify-content:space-between}
-.tile{border:1px solid #e8edf5;border-radius:14px;min-height:120px;background:white;color:#111827;box-shadow:0 2px 14px #1e3a6808;font-weight:800;font-size:15px;cursor:pointer;padding:18px 10px 16px;transition:transform .12s,box-shadow .12s,border-color .12s;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+.ch{font-size:11px;font-weight:700;color:#95a8be;text-transform:uppercase;letter-spacing:.9px;margin:0 0 14px;display:flex;align-items:center;justify-content:space-between}
+.tile{border:1px solid #e8edf5;border-radius:14px;min-height:110px;background:white;color:#111827;box-shadow:0 2px 14px #1e3a6808;font-weight:800;font-size:14px;cursor:pointer;padding:16px 10px;transition:transform .12s,box-shadow .12s,border-color .12s;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px}
 .tile:hover{transform:translateY(-2px);box-shadow:0 8px 24px #1e3a6818;border-color:#c8d8f0}
-.tile .ti{width:48px;height:48px;border-radius:12px;display:grid;place-items:center;color:white;font-size:19px;flex-shrink:0}
+.tile .ti{width:44px;height:44px;border-radius:11px;display:grid;place-items:center;color:white;font-size:18px;flex-shrink:0}
 .c-green{background:#1f9950}.c-blue{background:#1a68e0}.c-yellow{background:#d49600}.c-red{background:#d63b3b}.c-purple{background:#7848cc}.c-cyan{background:#0ab5cc}.c-orange{background:#d06a20}
 .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:14px}
-.stat{border:1px solid #e8edf5;border-radius:12px;padding:14px 12px;background:white}
+.stat{border:1px solid #e8edf5;border-radius:12px;padding:13px 12px;background:white}
 .stat .sl{font-size:10px;color:#95a8be;font-weight:700;text-transform:uppercase;letter-spacing:.6px;display:block}
-.stat b{font-size:22px;display:block;margin-top:5px;font-weight:800;color:#111827}
+.stat b{font-size:21px;display:block;margin-top:4px;font-weight:800;color:#111827}
 .pill{border-radius:999px;padding:3px 9px;font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
 .ok{background:#dff5e9;color:#15773a}.bad{background:#fce8e8;color:#b82020}.warn{background:#fef3d0;color:#8f5c00}.low{background:#e4edff;color:#1448b8}.off{background:#eaeef5;color:#5a6a80}
-.row{display:flex;gap:10px;align-items:center;border-bottom:1px solid #f0f4fa;padding:11px 0}
+.row{display:flex;gap:10px;align-items:center;border-bottom:1px solid #f0f4fa;padding:10px 0}
 .row:last-child{border-bottom:0}
 .dot{width:36px;height:36px;border-radius:9px;display:grid;place-items:center;color:white;font-weight:800;flex-shrink:0;font-size:14px}
 .rb{flex:1;min-width:0}.rb b{display:block;font-size:13.5px;font-weight:700}.rb span{display:block;font-size:12px;color:#8898b0;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ra{display:flex;gap:4px;flex-shrink:0;align-items:center}
-.sdot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:5px}
-.sdot.on{background:#1f9950}.sdot.off{background:#d63b3b}.sdot.warn{background:#d49600}
 .btn{border:1px solid #d5dde8;background:white;color:#1a2840;border-radius:999px;padding:8px 16px;font-weight:700;font-size:13px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:5px;transition:all .12s;white-space:nowrap}
 .btn:hover{background:#f0f5fc;border-color:#b8c8de}
 .btn.p{background:#1a68e0;color:white;border-color:#1a68e0}.btn.p:hover{background:#155ac4}
@@ -314,22 +246,22 @@ body{margin:0;background:#eef2f7;color:#111827;font-family:Inter,system-ui,-appl
 .field{width:100%;border:1px solid #d5dde8;border-radius:10px;padding:10px 13px;margin:4px 0;font:inherit;font-size:14px;color:#111827;outline:none;transition:border-color .15s,box-shadow .15s;background:white}
 .field:focus{border-color:#1a68e0;box-shadow:0 0 0 3px #1a68e010}
 select.field{cursor:pointer}
-.map{height:260px;border-radius:13px;background:linear-gradient(145deg,#e6f0ff,#d0e3f5);border:1px solid #c8d8ee;position:relative;overflow:hidden}
-.map.empty,.esbox{display:grid;place-items:center;color:#8898b0;text-align:center;min-height:90px;border:1.5px dashed #c0d0e0;border-radius:12px;background:#f5f8fd;padding:20px;font-size:13px}
+.map{height:240px;border-radius:13px;background:linear-gradient(145deg,#e6f0ff,#d0e3f5);border:1px solid #c8d8ee;position:relative;overflow:hidden}
+.map.empty,.esbox{display:grid;place-items:center;color:#8898b0;text-align:center;min-height:80px;border:1.5px dashed #c0d0e0;border-radius:12px;background:#f5f8fd;padding:18px;font-size:13px}
 .pin{position:absolute;width:28px;height:28px;border:0;border-radius:7px;display:grid;place-items:center;color:white;font-weight:900;cursor:pointer;font-size:11px;transition:transform .1s,box-shadow .1s}
 .pin:hover{transform:scale(1.18);box-shadow:0 4px 12px #0004}
-.camera{display:none;margin-top:10px}.camera img{width:100%;max-height:320px;object-fit:contain;background:#060e1f;border-radius:10px}
+.camera{display:none;margin-top:10px}.camera img{width:100%;max-height:300px;object-fit:contain;background:#060e1f;border-radius:10px}
 .tbl{width:100%;border-collapse:collapse}
-.tbl td,.tbl th{text-align:left;padding:10px 14px;border-bottom:1px solid #f0f4fa;font-size:13px;vertical-align:top}
+.tbl td,.tbl th{text-align:left;padding:9px 13px;border-bottom:1px solid #f0f4fa;font-size:13px;vertical-align:top}
 .tbl th{font-size:11px;font-weight:700;color:#8898b0;text-transform:uppercase;letter-spacing:.5px;background:#fafbfd}
 .tbl tr:last-child td{border-bottom:0}
 .toast{position:fixed;right:20px;bottom:24px;background:#0d1f3c;color:white;padding:13px 18px;border-radius:12px;box-shadow:0 8px 30px #00000030;display:none;font-weight:600;font-size:14px;z-index:200;max-width:320px}
-.lp{width:100px;height:100px;border-radius:16px;border:2px solid #18d0f0;background:#06172e;object-fit:cover;display:block;margin:8px 0}
+.lp{width:90px;height:90px;border-radius:14px;border:2px solid #18d0f0;background:#06172e;object-fit:cover;display:block;margin:8px 0}
 .fbox{background:#f5f8fd;border:1px solid #e5eaf3;border-radius:12px;padding:14px;margin-bottom:12px}
 .fl{font-size:11px;font-weight:700;color:#6878a0;text-transform:uppercase;letter-spacing:.5px;display:block;margin:8px 0 3px}
 .fl:first-child{margin-top:0}
 .ir{display:flex;gap:8px}.ir>.iw{flex:1}
-.ac{border:1px solid #f8c8c8;border-radius:12px;padding:14px;background:#fff5f5;margin-bottom:8px;display:flex;align-items:flex-start;gap:12px}
+.ac{border:1px solid #f8c8c8;border-radius:12px;padding:13px;background:#fff5f5;margin-bottom:8px;display:flex;align-items:flex-start;gap:12px}
 .ac.std{border-color:#fde5b0;background:#fffbf0}
 .adot{width:36px;height:36px;border-radius:10px;background:#d63b3b;color:white;display:grid;place-items:center;font-weight:900;flex-shrink:0;font-size:17px}
 .adot.std{background:#d49600}
@@ -337,7 +269,15 @@ select.field{cursor:pointer}
 .aa{flex-shrink:0;margin-top:2px}
 .dchip{display:inline-flex;align-items:center;gap:5px;background:#f0f5ff;border:1px solid #d0ddf5;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;color:#1448b8;margin:3px}
 .dchip .dc{width:6px;height:6px;border-radius:50%;background:#1a68e0;flex-shrink:0}
-@media(max-width:960px){.app{display:block}.side{display:none}.top{position:static;height:auto;padding:14px;flex-direction:column;gap:8px;align-items:flex-start}.g5,.g3,.g2,.stats{grid-template-columns:1fr}.content{padding:12px}}
+.sch-item{display:flex;align-items:flex-start;gap:10px;padding:11px 0;border-bottom:1px solid #f0f4fa}
+.sch-item:last-child{border-bottom:0}
+.ord-btn{border:1px solid #d5dde8;background:white;color:#5a6a80;border-radius:5px;width:22px;height:20px;display:grid;place-items:center;cursor:pointer;font-size:9px;padding:0;line-height:1}
+.ord-btn:hover:not(:disabled){background:#e8f0fc;color:#1a68e0;border-color:#b0c8ee}
+.ord-btn:disabled{opacity:.28;cursor:not-allowed}
+.res-row{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #f0f4fa}
+.res-row:last-child{border-bottom:0}
+.round-num{width:20px;height:20px;border-radius:50%;background:#e8f0fc;color:#1a68e0;font-size:11px;font-weight:800;display:grid;place-items:center;flex-shrink:0}
+@media(max-width:960px){.app{display:block}.side{display:none}.top{position:static;height:auto;padding:14px;flex-direction:column;gap:8px;align-items:flex-start}.g5,.g3,.g3t,.g2,.stats{grid-template-columns:1fr}.content{padding:12px}}
 </style></head><body><div class="app">
 <aside class="side">
 <div class="brand">
@@ -346,7 +286,7 @@ select.field{cursor:pointer}
 </div>
 <nav class="nav">
 <a data-view="command" class="active" onclick="sv('command',this)"><span class="ni">&#9632;</span>Command Center<span id="queueBadge" style="display:none;background:#d63b3b;color:white;border-radius:999px;font-size:10px;font-weight:700;padding:1px 7px;margin-left:auto;line-height:1.6">0</span></a>
-<a data-view="robots" onclick="sv('robots',this)"><span class="ni">&#9685;</span>Robot Feeds</a>
+<a data-view="robots" onclick="sv('robots',this)"><span class="ni">&#128247;</span>Robot Feeds</a>
 <div class="navdiv"></div>
 <a data-view="rounds" onclick="sv('rounds',this)"><span class="ni">&#8635;</span>Care Rounds</a>
 <a data-view="residents" onclick="sv('residents',this)"><span class="ni">&#9673;</span>Residents</a>
@@ -366,7 +306,7 @@ select.field{cursor:pointer}
 <header class="top">
 <div><h1 id="pageTitle">Command Center</h1><div class="sub" id="pageSubtitle">Live data from Nova and your facility registry.</div></div>
 <div class="topRight">
-<span class="pill low">${cleanText(user?.username || ADMIN_USER)} &middot; ${cleanText(user?.role || "admin")}</span>
+<span class="pill low">${cleanText(u.username)} &middot; ${cleanText(u.role)}</span>
 <span class="pill off" id="onlinePill">Offline</span>
 <span class="pill bad" id="alertCount" style="display:none">0 alerts</span>
 <a class="btn" href="/logout">Sign Out</a>
@@ -389,53 +329,70 @@ select.field{cursor:pointer}
 <div class="stat"><span class="sl">People Seen</span><b id="statPeople">—</b></div>
 <div class="stat"><span class="sl">Camera</span><b id="statCamera">—</b></div>
 </div>
-<div class="g3">
+<div class="g3" style="margin-top:14px">
 <div class="card"><div class="ch">Robot Status<div style="display:flex;gap:5px"><button class="btn s d" onclick="cmd('stop')">Stop</button><button class="btn s" onclick="cmd('charge')">Charge</button></div></div><div id="robotBox"></div></div>
 <div class="card"><div class="ch">Residents</div><div id="residentBox"></div></div>
 <div class="card"><div class="ch">Active Alerts</div><div id="alertBox"></div></div>
 </div>
-<div class="g3">
+<div class="g3" style="margin-top:14px">
 <div class="card"><div class="ch">People Detection</div><div id="peopleBox"></div></div>
 <div class="card"><div class="ch">Map</div><div class="map" id="mapBox"></div></div>
-<div class="card"><div class="ch">Camera<div style="display:flex;gap:5px"><button class="btn s p" onclick="cmd('camera_start')">Open</button><button class="btn s" onclick="cmd('camera_stop')">Close</button></div></div><div class="camera" id="cameraBox"><img id="camera" alt="Nova camera"><p style="font-size:12px;color:#8898b0;margin:6px 0 0" id="cameraNote"></p></div><div id="noCamera" class="esbox" style="min-height:80px">No camera feed from Nova yet.</div></div>
+<div class="card"><div class="ch">Camera<div style="display:flex;gap:5px"><button class="btn s p" onclick="cmd('camera_start')">Open</button><button class="btn s" onclick="cmd('camera_stop')">Close</button></div></div><div class="camera" id="cameraBox"><img id="camera" alt="Nova camera"><p style="font-size:12px;color:#8898b0;margin:6px 0 0" id="cameraNote"></p></div><div id="noCamera" class="esbox" style="min-height:70px">No camera feed from Nova.</div></div>
 </div>
 <div class="card" style="margin-top:14px"><div class="ch">Pending Command Queue<div style="display:flex;gap:6px;align-items:center"><span id="queueCount" class="pill off">0 pending</span><button class="btn s d" onclick="clearQueue()">Clear</button></div></div><div id="queueList"></div></div>
 </section>
 
 <section class="view" id="view-robots">
 <div class="g2">
-<div class="card">
-<div class="ch">Robot Telemetry<div style="display:flex;gap:5px"><button class="btn s d" onclick="cmd('stop')">Emergency Stop</button><button class="btn s" onclick="cmd('charge')">Go Charge</button></div></div>
-<div id="robotsFleet"></div>
-</div>
-<div class="card">
-<div class="ch">Detection Feed</div>
-<div id="robotDiagnostics"></div>
-<div style="margin-top:14px"><div class="ch" style="margin-bottom:10px">People in Range</div><div id="detectionList"></div></div>
-</div>
+<div class="card"><div class="ch">Robot Telemetry<div style="display:flex;gap:5px"><button class="btn s d" onclick="cmd('stop')">Emergency Stop</button><button class="btn s" onclick="cmd('charge')">Go Charge</button></div></div><div id="robotsFleet"></div></div>
+<div class="card"><div class="ch">Detection Feed</div><div id="robotDiagnostics"></div><div style="margin-top:14px"><div class="ch" style="margin-bottom:8px">People in Range</div><div id="detectionList"></div></div></div>
 </div>
 </section>
 
 <section class="view" id="view-rounds">
-<div class="g2">
+<div class="g3t">
 <div class="card">
-<div class="ch">Build Care Round<button class="btn s" onclick="selectAllForRound()">Select All</button></div>
+<div class="ch">Round Builder<button class="btn s" onclick="selectAllForRound()">Select All</button></div>
 <label class="fl">Round Type</label>
-<select class="field" id="roundType" style="margin-bottom:8px">
+<select class="field" id="roundType" style="margin-bottom:10px">
 <option value="checkin">Check-in Round</option>
 <option value="medication">Medication Round</option>
 <option value="full">Full Care (Check-in + Medication)</option>
 </select>
-<label class="fl">Residents to Include</label>
-<div id="roundResidentPicker" style="max-height:300px;overflow-y:auto;border:1px solid #e5eaf3;border-radius:10px;padding:0 12px;margin:6px 0 12px"></div>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+<span style="font-size:11px;font-weight:700;color:#6878a0;text-transform:uppercase;letter-spacing:.5px">Visit Order</span>
+<span style="font-size:11px;color:#8898b0">&#9650;&#9660; drag to reorder</span>
+</div>
+<div id="roundResidentPicker" style="border:1px solid #e5eaf3;border-radius:10px;overflow:hidden;max-height:360px;overflow-y:auto;margin-bottom:12px"></div>
 <button class="btn p" style="width:100%;justify-content:center" onclick="startRound()">&#8635;&nbsp; Start This Round</button>
 </div>
 <div class="card">
-<div class="ch">Quick Actions</div>
+<div class="ch">Scheduled Rounds<span id="schedBadge" class="pill ok" style="display:none">0 active</span></div>
+<div id="scheduleList"></div>
+<div style="margin-top:14px;padding-top:14px;border-top:1px solid #eef2f8">
+<div class="ch" style="margin-bottom:10px">New Schedule</div>
+<label class="fl">Name</label><input class="field" id="schName" placeholder="e.g. Morning Check-in">
+<div class="ir"><div class="iw"><label class="fl">Type</label><select class="field" id="schType"><option value="checkin">Check-in</option><option value="medication">Medication</option><option value="full">Full Care</option></select></div><div class="iw"><label class="fl">Time</label><input class="field" id="schTime" type="time" value="09:00"></div></div>
+<label class="fl">Repeats</label>
+<select class="field" id="schDays" style="margin-bottom:10px">
+<option value="daily">Every Day</option>
+<option value="weekdays">Weekdays (Mon – Fri)</option>
+<option value="weekends">Weekends</option>
+<option value="mon">Mondays only</option>
+<option value="tue">Tuesdays only</option>
+<option value="wed">Wednesdays only</option>
+<option value="thu">Thursdays only</option>
+<option value="fri">Fridays only</option>
+</select>
+<button class="btn p s" onclick="saveSchedule()">&#43; Add Schedule</button>
+</div>
+</div>
+<div class="card">
+<div class="ch">Round History</div>
+<div id="roundHistoryList"></div>
+<div style="margin-top:16px;padding-top:14px;border-top:1px solid #eef2f8">
+<div class="ch" style="margin-bottom:8px">Quick Check-in</div>
 <div id="roundResidents"></div>
-<div style="margin-top:18px;padding-top:16px;border-top:1px solid #eef2f8">
-<div class="ch" style="margin-bottom:10px">Reminders from Nova</div>
-<div id="roundSchedule"></div>
 </div>
 </div>
 </div>
@@ -462,7 +419,7 @@ select.field{cursor:pointer}
 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"><a class="btn s" href="/templates/residents.csv">Download Template</a></div>
 <input class="field" type="file" id="residentFile" accept=".csv,text/csv">
 <button class="btn s" onclick="uploadResidents()" style="margin-top:6px">Upload CSV</button>
-<p style="font-size:12px;color:#8898b0;margin:6px 0 0">Fill the template in Excel, save as CSV, then upload.</p>
+<p style="font-size:12px;color:#8898b0;margin:6px 0 0">Fill the template, save as CSV, then upload.</p>
 </div>
 </div>
 <div class="card">
@@ -502,19 +459,18 @@ select.field{cursor:pointer}
 <div class="card">
 <div class="ch">Destination Control</div>
 <label class="fl">Map Point</label><select class="field" id="pointSelect"></select>
-<button class="btn p" style="margin-top:10px" onclick="guideSelected()">Guide Visitor Here</button>
+<button class="btn p" style="margin-top:10px;width:100%;justify-content:center" onclick="guideSelected()">Guide Visitor Here</button>
 <div style="margin-top:18px;padding-top:16px;border-top:1px solid #eef2f8">
 <div class="ch" style="margin-bottom:10px">Send a Message</div>
-<label class="fl">Message (Nova will speak this)</label><textarea class="field" id="messageText" rows="3" placeholder="Please proceed to the waiting area. Your appointment is ready."></textarea>
-<button class="btn" style="margin-top:8px" onclick="sendMessage()">Send Message to Point</button>
+<label class="fl">Message (Nova will speak this)</label><textarea class="field" id="messageText" rows="3" placeholder="Please proceed to the waiting area."></textarea>
+<button class="btn" style="margin-top:8px;width:100%;justify-content:center" onclick="sendMessage()">Send Message to Point</button>
 </div>
 </div>
 </div>
 </section>
 
 <section class="view" id="view-logs">
-<div class="card">
-<div class="ch">Operations Log</div>
+<div class="card"><div class="ch">Operations Log</div>
 <table class="tbl"><thead><tr><th>Time</th><th>Event</th><th>Detail</th></tr></thead><tbody id="opsLog"></tbody></table>
 </div>
 </section>
@@ -527,7 +483,7 @@ select.field{cursor:pointer}
 <div style="margin-top:14px;display:flex;flex-wrap:wrap;gap:6px"><button class="btn p s" onclick="cmd('camera_start')">Test Camera</button><button class="btn s" onclick="cmd('security_start')">Test Detection</button></div>
 <div style="margin-top:20px;padding-top:16px;border-top:1px solid #eef2f8">
 <div class="ch" style="margin-bottom:10px">Brand Logo</div>
-<img class="lp" id="logoPreview" src="${brandLogoDataUrl || ""}" alt="ZOX logo">
+<img class="lp" id="logoPreview" src="${brandLogoDataUrl || ""}" alt="Logo">
 <input class="field" id="logoFile" type="file" accept="image/png,image/jpeg,image/webp" style="margin-top:8px">
 <button class="btn p s" onclick="uploadLogo()" style="margin-top:6px">Upload Logo</button>
 <p style="font-size:12px;color:#8898b0;margin:6px 0 0">PNG or JPG, max 5 MB.</p>
@@ -536,7 +492,7 @@ select.field{cursor:pointer}
 <div class="card">
 <div class="ch">User Access</div>
 <div class="fbox">
-<label class="fl">Username</label><input class="field" id="newUser" placeholder="Username (3–40 characters)">
+<label class="fl">Username</label><input class="field" id="newUser" placeholder="Username (3–40 chars)">
 <label class="fl">Password</label><input class="field" id="newPass" type="password" placeholder="Minimum 8 characters">
 <label class="fl">Role</label><select class="field" id="newRole"><option value="operator">Operator</option><option value="viewer">Viewer</option><option value="admin">Admin</option></select>
 <button class="btn p s" style="margin-top:8px" onclick="addUser()">Add User</button>
@@ -555,12 +511,12 @@ select.field{cursor:pointer}
 <div class="toast" id="toast"></div>
 <script>
 var columns=${JSON.stringify(residentColumns)};
-var T={command:["Command Center","Live data from Nova and your facility registry."],robots:["Robot Feeds","Telemetry and people detection feed from Nova."],rounds:["Care Rounds","Launch rounds and check in with registered residents."],residents:["Residents","Manage the resident registry and send Nova on check-ins."],alerts:["Alerts","Create urgent staff alerts and monitor facility events."],map:["Map &amp; Messaging","Live map points from Nova."],logs:["Operations Log","Commands, state updates and facility actions."],settings:["Settings","Relay status, users, logo and CSV format."]};
+var T={command:["Command Center","Live data from Nova and your facility registry."],robots:["Robot Feeds","Telemetry and detection feed from Nova."],rounds:["Care Rounds","Build rounds, set schedules, and track check-ins."],residents:["Residents","Manage the resident registry."],alerts:["Alerts","Create urgent alerts and monitor facility events."],map:["Map & Messaging","Live map points from Nova."],logs:["Operations Log","Commands, state updates and facility actions."],settings:["Settings","Relay status, users, logo and CSV format."]};
 function get(p){return fetch(p,{cache:"no-store"}).then(function(r){return r.ok?r.json():{};}).catch(function(){return{};})}
 function post(p,b){return fetch(p,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b)}).then(function(r){return r.json();}).catch(function(){return{ok:false,error:"Network error"};})}
 function cmd(action,params){params=params||{};post("/api/command",{action:action,params:params}).then(function(out){notice(out.ok?"Command sent to Nova":"Error: "+(out.error||"failed"),out.ok);refresh();});}
 function esc(v){var map={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};return String(v||"").replace(/[&<>"']/g,function(c){return map[c];});}
-function notice(t,ok){if(ok===undefined)ok=true;var el=document.getElementById("toast");if(!el)return;el.textContent=t;el.style.background=ok?"#0d1f3c":"#7a1c1c";el.style.display="block";clearTimeout(notice._t);notice._t=setTimeout(function(){el.style.display="none";},3000);}
+function notice(t,ok){if(ok===undefined)ok=true;var el=document.getElementById("toast");if(!el)return;el.textContent=t;el.style.background=ok?"#0d1f3c":"#7a1c1c";el.style.display="block";clearTimeout(notice._t);notice._t=setTimeout(function(){el.style.display="none";},3500);}
 function sv(name,el){
   var views=document.querySelectorAll(".view");
   for(var i=0;i<views.length;i++){views[i].classList.remove("active");views[i].classList.add("hidden");}
@@ -574,19 +530,21 @@ function sv(name,el){
   if(ps&&T[name])ps.innerHTML=T[name][1]||"";
 }
 function rRow(col,title,sub,right){if(right===undefined)right="";return '<div class="row"><div class="dot c-'+col+'">'+esc(String(title||"?")[0])+'</div><div class="rb"><b>'+esc(title)+'</b><span>'+esc(sub)+'</span></div><div class="ra">'+right+'</div></div>';}
-function esb(t){return '<div class="esbox" style="min-height:70px">'+esc(t)+'</div>'}
+function esb(t){return '<div class="esbox">'+esc(t)+'</div>';}
+function timeAgo(ms){var d=Date.now()-ms;if(d<60000)return"just now";if(d<3600000)return Math.floor(d/60000)+"m ago";if(d<86400000)return Math.floor(d/3600000)+"h ago";return Math.floor(d/86400000)+"d ago";}
 function byId(id){var s=window._s;var res=(s&&s.care&&s.care.residents)||[];for(var i=0;i<res.length;i++){if(res[i].id===id)return res[i];}return null;}
 function rParams(id){var el=document.getElementById("residentSelect");var rid=id||(el&&el.value)||"";var r=byId(rid);if(r){return{residentId:r.id,residentName:r.name,room:r.room,mapPoint:r.mapPoint||r.room,notes:[r.medicationNotes,r.mobilityNotes,r.emergencyNotes].filter(Boolean).join("; "),checkInPrompt:r.checkInSchedule||""};}return{residentId:rid};}
 function checkInResident(id){if(!id)return notice("Select a resident first.",false);cmd("resident_checkin",rParams(id));}
 function medResident(id){if(!id)return notice("Select a resident first.",false);cmd("med_reminder",rParams(id));}
 function checkInSelected(){var el=document.getElementById("residentSelect");checkInResident(el&&el.value);}
 function medSelected(){var el=document.getElementById("residentSelect");medResident(el&&el.value);}
-function guideSelected(){var el=document.getElementById("pointSelect");var p=el&&el.value;if(!p||p.indexOf("No ")==0)return notice("No map points received from Nova yet.",false);cmd("visitor_guide",{destination:p});}
 function staffAlert(){cmd("staff_alert",{priority:"urgent",message:"Staff assistance requested."});}
+function staffAlertForResident(){var el=document.getElementById("residentSelect");cmd("staff_alert",{priority:"urgent",residentId:(el&&el.value)||"",message:"Assistance requested for resident."});}
+function guideSelected(){var el=document.getElementById("pointSelect");var p=el&&el.value;if(!p||p.indexOf("No ")==0)return notice("No map points received from Nova yet.",false);cmd("visitor_guide",{destination:p});}
 function sendMessage(){var el=document.getElementById("pointSelect");var p=el&&el.value;if(!p||p.indexOf("No ")==0)return notice("No map points received from Nova yet.",false);var mt=document.getElementById("messageText");cmd("message",{destination:p,message:(mt&&mt.value)||"Please meet Nova at this location."});}
 var _eid=null;
 function editResident(id){
-  var r=byId(id);if(!r)return notice("Resident not loaded yet. Try again in a moment.",false);
+  var r=byId(id);if(!r)return notice("Resident not loaded yet. Try again.",false);
   _eid=id;
   var fields={manualName:r.name,manualRoom:r.room,manualMapPoint:r.mapPoint||r.room,manualWing:r.wing||"",manualCare:r.careLevel||"",manualPhone:r.contactPhone||"",manualNotes:[r.medicationNotes,r.mobilityNotes,r.emergencyNotes].filter(Boolean).join("; "),manualPrompt:r.checkInSchedule||""};
   Object.keys(fields).forEach(function(fid){var el=document.getElementById(fid);if(el)el.value=fields[fid];});
@@ -614,9 +572,8 @@ function saveResident(){
   var b={full_name:name,room:room,map_point:mapPoint,wing:gv("manualWing"),care_level:gv("manualCare"),primary_contact_phone:gv("manualPhone"),medication_notes:gv("manualNotes"),check_in_schedule:gv("manualPrompt")};
   if(_eid)b.resident_id=_eid;
   post("/api/residents",b).then(function(out){
-    notice(out.ok?(_eid?"Resident updated successfully":"Resident added"):(out.error||"Could not save"),out.ok);
-    if(out.ok)cancelEdit();
-    refresh();
+    notice(out.ok?(_eid?"Resident updated":"Resident added"):(out.error||"Could not save"),out.ok);
+    if(out.ok)cancelEdit();refresh();
   });
 }
 function deleteResident(id){
@@ -630,7 +587,7 @@ function createAlert(priority){
   if(!msg)return notice("Please describe the situation.",false);
   var roomEl=document.getElementById("alertRoom");var room=(roomEl&&roomEl.value.trim())||"";
   post("/api/alerts",{priority:priority||"urgent",room:room,message:msg}).then(function(out){
-    notice(out.ok?"Alert created and sent to Nova":(out.error||"Could not create alert"),out.ok);
+    notice(out.ok?"Alert created":(out.error||"Could not create alert"),out.ok);
     if(out.ok){var ar=document.getElementById("alertRoom");var am=document.getElementById("alertMessage");if(ar)ar.value="";if(am)am.value="";}
     refresh();
   });
@@ -642,7 +599,7 @@ function dismissAlert(id){
 }
 function uploadResidents(){
   var fi=document.getElementById("residentFile");var file=fi&&fi.files&&fi.files[0];
-  if(!file)return notice("Choose the completed CSV first.",false);
+  if(!file)return notice("Choose a CSV file first.",false);
   var reader=new FileReader();
   reader.onload=function(){
     fetch("/api/residents/import",{method:"POST",headers:{"content-type":"text/csv"},body:reader.result}).then(function(r){return r.json();}).then(function(out){
@@ -654,13 +611,13 @@ function uploadResidents(){
 }
 function uploadLogo(){
   var fi=document.getElementById("logoFile");var file=fi&&fi.files&&fi.files[0];
-  if(!file)return notice("Choose the logo image first.",false);
+  if(!file)return notice("Choose a logo image first.",false);
   if(file.size>5*1024*1024)return notice("Logo too large. Use PNG/JPEG under 5 MB.",false);
   var reader=new FileReader();
   reader.onload=function(){
     post("/api/logo",{dataUrl:reader.result}).then(function(out){
       notice(out.ok?"Logo updated":(out.error||"Failed"),out.ok);
-      if(out.logo){var lp=document.getElementById("logoPreview");var sl=document.getElementById("sideLogo");if(lp)lp.src=out.logo;if(sl)sl.innerHTML='<img src="'+out.logo+'" alt="ZOX">';}
+      if(out.logo){var lp=document.getElementById("logoPreview");var sl=document.getElementById("sideLogo");if(lp)lp.src=out.logo;if(sl)sl.innerHTML='<img src="'+out.logo+'" alt="ZOX" style="width:100%;height:100%;object-fit:cover">';}
       var lf=document.getElementById("logoFile");if(lf)lf.value="";
     });
   };
@@ -681,7 +638,7 @@ function loadUsers(){
 }
 function renderMap(target,points){
   if(!target)return;
-  if(!points.length){target.className="map empty";target.innerHTML='<div style="font-size:13px;color:#8898b0;text-align:center">No map points from Nova yet.</div>';return}
+  if(!points.length){target.className="map empty";target.innerHTML='<div style="font-size:13px;color:#8898b0;text-align:center">No map points from Nova yet.</div>';return;}
   target.className="map";
   var cols=["c-blue","c-green","c-purple","c-cyan","c-orange"];
   target.innerHTML=points.slice(0,10).map(function(p,i){
@@ -694,10 +651,138 @@ function aCard(a){
   var u=a.priority!=="standard";
   return '<div class="ac'+(u?"":" std")+'"><div class="adot'+(u?"":" std")+'">'+(u?"!":"&#9650;")+'</div><div class="ab"><b>'+esc(a.message||"Alert")+'</b><span class="as">'+esc(a.room||"Facility")+" &middot; "+new Date(a.createdAt||Date.now()).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})+'</span></div><div class="aa"><button class="btn s d" onclick="dismissAlert(&#39;'+esc(a.id)+'&#39;)">Dismiss</button></div></div>';
 }
+function moveResidentUp(id){
+  var order=window._roundOrder||[];var idx=order.indexOf(id);
+  if(idx<=0)return;
+  var tmp=order[idx-1];order[idx-1]=order[idx];order[idx]=tmp;
+  window._roundOrder=order;
+  var s=window._s;renderRoundPicker((s&&s.care&&s.care.residents)||[]);
+}
+function moveResidentDown(id){
+  var order=window._roundOrder||[];var idx=order.indexOf(id);
+  if(idx<0||idx>=order.length-1)return;
+  var tmp=order[idx+1];order[idx+1]=order[idx];order[idx]=tmp;
+  window._roundOrder=order;
+  var s=window._s;renderRoundPicker((s&&s.care&&s.care.residents)||[]);
+}
+function sortedResidents(res){
+  var order=window._roundOrder||[];
+  return res.slice().sort(function(a,b){
+    var ia=order.indexOf(a.id),ib=order.indexOf(b.id);
+    if(ia>=0&&ib>=0)return ia-ib;if(ia>=0)return -1;if(ib>=0)return 1;return 0;
+  });
+}
+function renderRoundPicker(res){
+  var el=document.getElementById("roundResidentPicker");if(!el)return;
+  if(!res.length){el.innerHTML='<div class="esbox">No residents registered. Add them in the Residents section.</div>';return;}
+  var sorted=sortedResidents(res);
+  var prev={};var cbs=document.querySelectorAll(".round-res-cb");
+  for(var i=0;i<cbs.length;i++)prev[cbs[i].value]=cbs[i].checked;
+  var checkIns=(window._s&&window._s.facility&&window._s.facility.checkIns)||{};
+  el.innerHTML=sorted.map(function(r,idx){
+    var chk=prev[r.id]===false?"":"checked";
+    var lastCI=checkIns[r.id];
+    var lastStr=lastCI?timeAgo(lastCI):"Never";
+    return '<div class="res-row">'+
+      '<span class="round-num">'+(idx+1)+'</span>'+
+      '<input type="checkbox" class="round-res-cb" value="'+esc(r.id)+'" '+chk+' style="width:15px;height:15px;accent-color:#1a68e0;flex-shrink:0">'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-weight:600;font-size:13px">'+esc(r.name)+'</div>'+
+        '<div style="font-size:11px;color:#8898b0">Room '+esc(r.room)+(r.careLevel?' &middot; '+esc(r.careLevel):'')+' &middot; Last: '+lastStr+'</div>'+
+      '</div>'+
+      '<div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0">'+
+        '<button class="ord-btn" onclick="moveResidentUp(&#39;'+esc(r.id)+'&#39;)" '+(idx===0?'disabled':'')+'>&#9650;</button>'+
+        '<button class="ord-btn" onclick="moveResidentDown(&#39;'+esc(r.id)+'&#39;)" '+(idx===sorted.length-1?'disabled':'')+'>&#9660;</button>'+
+      '</div></div>';
+  }).join('');
+}
+function selectAllForRound(){var cbs=document.querySelectorAll(".round-res-cb");for(var i=0;i<cbs.length;i++)cbs[i].checked=true;}
+function startRound(){
+  var typeEl=document.getElementById("roundType");var roundType=typeEl?typeEl.value:"checkin";
+  var cbs=document.querySelectorAll(".round-res-cb");var selected=[];
+  for(var i=0;i<cbs.length;i++){if(cbs[i].checked)selected.push(cbs[i].value);}
+  var s=window._s;var allRes=(s&&s.care&&s.care.residents)||[];
+  var sorted=sortedResidents(allRes);
+  var residents=selected.length?sorted.filter(function(r){return selected.indexOf(r.id)>=0;}):sorted;
+  if(!residents.length)return notice("No residents selected. Add residents first.",false);
+  var ids=sorted.map(function(r){return r.id;});
+  fetch("/api/round-order",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({order:ids})});
+  cmd("start_rounds",{type:roundType,residents:residents.map(function(r){return{id:r.id,name:r.name,room:r.room,mapPoint:r.mapPoint||r.room,checkInPrompt:r.checkInSchedule||""};})});
+}
+function renderSchedules(schedules){
+  var el=document.getElementById("scheduleList");if(!el)return;
+  var sb=document.getElementById("schedBadge");
+  var active=schedules.filter(function(s){return s.enabled;}).length;
+  if(sb){if(active){sb.textContent=active+" active";sb.style.display="inline-flex";}else sb.style.display="none";}
+  if(!schedules.length){el.innerHTML=esb("No scheduled rounds yet. Add one below.");return;}
+  el.innerHTML=schedules.map(function(s){
+    var dLabel=Array.isArray(s.days)?s.days.join(", "):String(s.days||"daily");
+    return '<div class="sch-item">'+
+      '<div style="flex:1;min-width:0">'+
+        '<div style="font-weight:700;font-size:13px">'+esc(s.name)+'</div>'+
+        '<div style="font-size:12px;color:#8898b0;margin-top:2px">'+esc(s.type)+' &middot; '+esc(s.time)+' &middot; '+esc(dLabel)+'</div>'+
+        (s.lastRun?'<div style="font-size:11px;color:#b0b8cc;margin-top:1px">Last run: '+esc(s.lastRun.split(' ').slice(0,4).join(' '))+'</div>':'')+
+      '</div>'+
+      '<div style="display:flex;gap:5px;align-items:center;flex-shrink:0">'+
+        '<button class="btn s '+(s.enabled?"p":"")+'" onclick="toggleSchedule(&#39;'+esc(s.id)+'&#39;)">'+(s.enabled?"ON":"OFF")+'</button>'+
+        '<button class="btn s d" onclick="deleteSchedule(&#39;'+esc(s.id)+'&#39;)" title="Delete">&#10005;</button>'+
+      '</div></div>';
+  }).join('');
+}
+function saveSchedule(){
+  var n=document.getElementById("schName");var name=n&&n.value.trim();
+  if(!name)return notice("Schedule name is required.",false);
+  var typeEl=document.getElementById("schType");var timeEl=document.getElementById("schTime");var daysEl=document.getElementById("schDays");
+  var time=(timeEl&&timeEl.value)||"09:00";
+  var daysRaw=(daysEl&&daysEl.value)||"daily";
+  var days=daysRaw==="weekdays"?["mon","tue","wed","thu","fri"]:daysRaw==="weekends"?["sat","sun"]:daysRaw;
+  post("/api/schedules",{name:name,type:(typeEl&&typeEl.value)||"checkin",time:time,days:days,enabled:true}).then(function(out){
+    notice(out.ok?"Schedule saved":(out.error||"Could not save"),out.ok);
+    if(out.ok&&n)n.value="";refresh();
+  });
+}
+function deleteSchedule(id){
+  if(!confirm("Delete this schedule?"))return;
+  fetch("/api/schedules/"+encodeURIComponent(id),{method:"DELETE"}).then(function(r){return r.json();}).then(function(out){
+    notice(out.ok?"Schedule deleted":(out.error||"Could not delete"),out.ok);refresh();
+  });
+}
+function toggleSchedule(id){
+  post("/api/schedules/"+encodeURIComponent(id)+"/toggle",{}).then(function(out){
+    notice(out.ok?(out.enabled?"Schedule enabled":"Schedule paused"):(out.error||"Could not toggle"),out.ok);refresh();
+  });
+}
+function renderRoundHistory(history){
+  var el=document.getElementById("roundHistoryList");if(!el)return;
+  if(!history||!history.length){el.innerHTML=esb("No rounds have run yet.");return;}
+  el.innerHTML=history.slice(0,8).map(function(h){
+    var typeLabel=h.type==="medication"?"Medication":h.type==="full"?"Full Care":"Check-in";
+    var trigLabel=h.trigger==="schedule"?"Scheduled":"Manual";
+    return rRow("green",esc(h.name||"Round"),typeLabel+" &middot; "+h.count+" residents &middot; "+timeAgo(h.at)+" &middot; "+trigLabel);
+  }).join('');
+}
+function refreshQueue(){
+  get("/api/queue").then(function(out){
+    var count=(out.queue&&out.queue.length)||0;
+    var qc=document.getElementById("queueCount");var ql=document.getElementById("queueList");var qb=document.getElementById("queueBadge");
+    if(qc){qc.textContent=count+" pending";qc.className="pill "+(count?"warn":"off");}
+    if(qb){if(count){qb.textContent=count;qb.style.display="inline-flex";}else qb.style.display="none";}
+    if(ql){
+      if(!count){ql.innerHTML=esb("No pending commands. Robot is up to date.");}
+      else{ql.innerHTML=(out.queue||[]).slice(0,10).map(function(c){return rRow("blue",c.action,new Date(c.at||Date.now()).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"}));}).join("")+(count>10?'<p style="font-size:12px;color:#8898b0;margin:8px 0 0">+'+(count-10)+" more</p>":'');}
+    }
+  });
+}
+function clearQueue(){
+  fetch("/api/queue",{method:"DELETE"}).then(function(r){return r.json();}).then(function(out){
+    notice(out.ok?"Command queue cleared":(out.error||"Could not clear"),out.ok);refreshQueue();
+  });
+}
 function renderAll(s){
   if(!s||typeof s!=="object")return;
   var c=s.care||{};var res=c.residents||[];var rem=c.reminders||[];var al=c.alerts||[];var pts=s.points||[];var ppl=s.people||[];
   window._s=s;
+  if(!window._roundOrder||!window._roundOrder.length){var fac=s.facility||{};window._roundOrder=fac.roundOrder||[];}
   function gi(id){return document.getElementById(id);}
   function st(id,v){var e=gi(id);if(e)e.textContent=v;}
   function ht(id,v){var e=gi(id);if(e)e.innerHTML=v;}
@@ -708,72 +793,36 @@ function renderAll(s){
   var ac=gi("alertCount");if(ac){if(al.length){ac.style.display="inline-flex";ac.textContent=al.length+" alert"+(al.length===1?"":"s");ac.className="pill bad";}else ac.style.display="none";}
   var status=s.status||{};
   var bat=esc(status.battery||"");var dest=esc(status.destination||"");var stat=esc(status.status||"");
-  var robotHtml='<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f0f4fa"><div class="dot c-'+(s.online?"blue":"red")+'" style="width:42px;height:42px;font-size:16px">N</div><div style="flex:1"><div style="font-weight:700;font-size:14px">Nova 01</div><div style="font-size:12px;color:#8898b0;margin-top:2px">'+(dest||"No active destination")+"</div></div>"+(s.online?'<span class="pill ok" style="white-space:nowrap">Online</span>':'<span class="pill off">Offline</span>')+"</div>"+(bat?'<div style="margin-top:8px;font-size:12px;color:#5a6a80"><b style="color:#374151">Battery:</b> '+bat+"</div>":"")+(stat?'<div style="margin-top:4px;font-size:12px;color:#5a6a80"><b style="color:#374151">Status:</b> '+stat+"</div>":"");
+  var robotHtml='<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f0f4fa"><div class="dot c-'+(s.online?"blue":"red")+'" style="width:42px;height:42px;font-size:16px">N</div><div style="flex:1"><div style="font-weight:700;font-size:14px">Nova 01</div><div style="font-size:12px;color:#8898b0;margin-top:2px">'+(dest||"No active destination")+"</div></div>"+(s.online?'<span class="pill ok">Online</span>':'<span class="pill off">Offline</span>')+"</div>"+(bat?'<div style="margin-top:8px;font-size:12px;color:#5a6a80"><b style="color:#374151">Battery:</b> '+bat+"</div>":"")+(stat?'<div style="margin-top:4px;font-size:12px;color:#5a6a80"><b style="color:#374151">Status:</b> '+stat+"</div>":"");
   ht("robotBox",robotHtml);ht("robotsFleet",robotHtml);
-  ht("residentBox",res.length?res.slice(0,4).map(function(r){return'<div class="row"><div class="dot c-purple">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+esc(r.room)+'</span></div><div class="ra"><button class="btn s p" onclick="checkInResident(&#39;'+esc(r.id)+'&#39;)">Go</button></div></div>';}).join("")+(res.length>4?'<p style="font-size:12px;color:#8898b0;margin:8px 0 0">+'+(res.length-4)+" more</p>":""):esb("No residents yet. Add them in the Residents section."));
+  ht("residentBox",res.length?res.slice(0,4).map(function(r){return'<div class="row"><div class="dot c-purple">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+esc(r.room)+'</span></div><div class="ra"><button class="btn s p" onclick="checkInResident(&#39;'+esc(r.id)+'&#39;)">Go</button></div></div>';}).join("")+(res.length>4?'<p style="font-size:12px;color:#8898b0;margin:8px 0 0">+'+(res.length-4)+" more</p>":""):esb("No residents yet."));
   ht("alertBox",al.length?al.slice(0,3).map(function(a){return'<div class="row"><div class="dot c-'+(a.priority!=="standard"?"red":"yellow")+'">!</div><div class="rb"><b>'+esc((a.message||"Alert").slice(0,60))+'</b><span>'+esc(a.room||"Facility")+'</span></div><div class="ra"><button class="btn s d" onclick="dismissAlert(&#39;'+esc(a.id)+'&#39;)">&#215;</button></div></div>';}).join("")+(al.length>3?'<p style="font-size:12px;color:#8898b0;margin:8px 0 0">+'+(al.length-3)+" more</p>":""):esb("No active alerts."));
   ht("peopleBox",ppl.length?ppl.map(function(p){return'<div class="dchip"><div class="dc"></div>Person&nbsp;'+(p.id||"?")+" &mdash; "+(p.distance!=null?p.distance+"m away":"detected")+"</div>";}).join(""):esb("No people detected by Nova."));
   renderMap(gi("mapBox"),pts);renderMap(gi("fullMapBox"),pts);
   var sdkOk=!!(status.robotSdk);
-  ht("robotDiagnostics",rRow(sdkOk?"green":"yellow","Robot SDK",sdkOk?"AgentOS connected":"No SDK connection detected")+rRow("blue","Map Points",pts.length+" point"+(pts.length!==1?"s":"")+" known")+rRow(s.camera?"green":"red","Camera Feed",s.camera?"Frame available":"No frame received"));
-  ht("detectionList",ppl.length?ppl.map(function(p){return'<div class="row"><div class="dot c-cyan" style="font-size:11px">&#9679;</div><div class="rb"><b>Person detected</b><span>'+(p.distance!=null?"Distance: "+p.distance+"m":"Position: x="+(p.x||"-")+", y="+(p.y||"-"))+"</span></div></div>";}).join(""):esb("No people currently in Nova's detection range."));
-  ht("roundResidents",res.length?res.map(function(r){return'<div class="row"><div class="dot c-blue">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+esc(r.room)+'</span></div><div class="ra"><button class="btn s p" onclick="checkInResident(&#39;'+esc(r.id)+'&#39;)">Check In</button><button class="btn s" onclick="medResident(&#39;'+esc(r.id)+'&#39;)">Med</button></div></div>';}).join(""):esb("Register residents to use care rounds."));
+  ht("robotDiagnostics",rRow(sdkOk?"green":"yellow","Robot SDK",sdkOk?"AgentOS connected":"No SDK connection")+rRow("blue","Map Points",pts.length+" point"+(pts.length!==1?"s":"")+" known")+rRow(s.camera?"green":"red","Camera",s.camera?"Frame available":"No frame"));
+  ht("detectionList",ppl.length?ppl.map(function(p){return'<div class="row"><div class="dot c-cyan" style="font-size:11px">&#9679;</div><div class="rb"><b>Person detected</b><span>'+(p.distance!=null?"Distance: "+p.distance+"m":"x="+(p.x||"-")+", y="+(p.y||"-"))+"</span></div></div>";}).join(""):esb("No people in Nova's detection range."));
+  var checkIns=(s.facility&&s.facility.checkIns)||{};
+  ht("roundResidents",res.length?res.map(function(r){var lastCI=checkIns[r.id];var lastStr=lastCI?timeAgo(lastCI):"Never";return'<div class="row"><div class="dot c-blue">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>Room '+esc(r.room)+' &middot; Last check-in: '+lastStr+'</span></div><div class="ra"><button class="btn s p" onclick="checkInResident(&#39;'+esc(r.id)+'&#39;)">Check In</button><button class="btn s" onclick="medResident(&#39;'+esc(r.id)+'&#39;)">Med</button></div></div>';}).join(""):esb("Add residents to begin care rounds."));
   ht("roundSchedule",rem.length?rem.map(function(r){return rRow("green",r.timeLabel||"Scheduled",r.title||"Reminder");}).join(""):esb("No reminders from Nova."));
   renderRoundPicker(res);
-  ht("residentDirectory",res.length?res.map(function(r){return'<div class="row"><div class="dot c-purple">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+esc(r.room+(r.wing?" &middot; "+r.wing:"")+(r.careLevel?" &mdash; "+r.careLevel:""))+'</span></div><div class="ra"><button class="btn s" onclick="editResident(&#39;'+esc(r.id)+'&#39;)">Edit</button><button class="btn s d" onclick="deleteResident(&#39;'+esc(r.id)+'&#39;)">Remove</button></div></div>';}).join(""):esb("No residents. Add one using the form."));
+  renderSchedules(s.scheduledRounds||[]);
+  renderRoundHistory(s.roundHistory||[]);
+  ht("residentDirectory",res.length?res.map(function(r){var lastCI=checkIns[r.id];var sub=r.room+(r.wing?" &middot; Wing "+r.wing:"")+(r.careLevel?" &mdash; "+r.careLevel:"")+(lastCI?" &middot; Seen "+timeAgo(lastCI):"");return'<div class="row"><div class="dot c-purple">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+sub+'</span></div><div class="ra"><button class="btn s" onclick="editResident(&#39;'+esc(r.id)+'&#39;)">Edit</button><button class="btn s d" onclick="deleteResident(&#39;'+esc(r.id)+'&#39;)">Remove</button></div></div>';}).join(""):esb("No residents. Add one using the form."));
   var rs=gi("residentSelect");if(rs)rs.innerHTML=res.length?res.map(function(r){return'<option value="'+esc(r.id)+'">'+esc(r.name)+" &mdash; Room "+esc(r.room)+"</option>";}).join(""):"<option disabled>No residents registered yet</option>";
   ht("alertCenter",al.length?al.map(aCard).join(""):esb("No active alerts."));
   var ps2=gi("pointSelect");if(ps2)ps2.innerHTML=pts.length?pts.map(function(p){return'<option value="'+esc(p.name)+'">'+esc(p.name)+"</option>";}).join(""):"<option disabled>No map points from Nova yet</option>";
   var cLogs=c.logs||[];var eLogs=(s.events||[]).slice().reverse().map(function(e){return{createdAt:e.at,title:e.type,detail:typeof e.data==="object"?Object.keys(e.data||{}).slice(0,4).map(function(k){return k+": "+String(e.data[k]).slice(0,40);}).join(", "):String(e.data||"")};});
   var logRows=cLogs.concat(eLogs);
   ht("opsLog",(logRows.length?logRows:[{title:"Ready",detail:"Waiting for robot and facility activity."}]).slice(0,80).map(function(l){return'<tr><td style="width:75px;white-space:nowrap;color:#8898b0;font-size:12px">'+new Date(l.createdAt||Date.now()).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})+'</td><td style="font-weight:600;font-size:13px">'+esc(l.title||"Event")+'</td><td style="font-size:12px;color:#5a6a80">'+esc(String(l.detail||"").slice(0,140))+"</td></tr>";}).join(""));
-  var fh={resident_id:"Optional. Auto-generated if blank.",full_name:"Required.",room:"Required.",map_point:"Exact Nova map point name. Falls back to room.",wing:"Optional.",care_level:"Independent / Assisted / High.",primary_contact_name:"Optional.",primary_contact_phone:"Optional.",medication_notes:"Medication schedule.",mobility_notes:"Mobility aids and restrictions.",preferred_language:"Communication preference.",check_in_schedule:"e.g. daily 09:00",emergency_notes:"Critical staff notes."};
+  var fh={resident_id:"Optional — auto-generated if blank.",full_name:"Required.",room:"Required.",map_point:"Exact Nova map point name.",wing:"Optional.",care_level:"Independent / Assisted / High.",primary_contact_name:"Optional.",primary_contact_phone:"Optional.",medication_notes:"Medication schedule.",mobility_notes:"Mobility aids and restrictions.",preferred_language:"Communication preference.",check_in_schedule:"e.g. daily 09:00",emergency_notes:"Critical staff notes."};
   ht("formatRows",columns.map(function(col){return'<tr><td style="font-weight:700;font-size:12px;white-space:nowrap">'+col+'</td><td style="font-size:12px;color:#5a6a80">'+esc(fh[col]||"")+"</td></tr>";}).join(""));
-  ht("settingsRelay",rRow(s.online?"green":"red","Robot Connection",s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"Not connected")+rRow(s.camera?"green":"red","Camera Feed",s.camera?"Frame available":"No frame")+rRow("blue","Resident Registry",res.length+" registered"));
+  ht("settingsRelay",rRow(s.online?"green":"red","Robot Connection",s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"Not connected")+rRow(s.camera?"green":"red","Camera Feed",s.camera?"Active":"No frame")+rRow("blue","Residents",res.length+" registered")+rRow("purple","Schedules",(s.scheduledRounds||[]).length+" configured"));
   var cb=gi("cameraBox");var nc=gi("noCamera");var cam=gi("camera");var cn=gi("cameraNote");
   if(s.camera){if(cb)cb.style.display="block";if(nc)nc.style.display="none";if(cam)cam.src="/api/camera.jpg?t="+Date.now();if(cn)cn.textContent="Live snapshot — updates every 2s";}
   else{if(cb)cb.style.display="none";if(nc)nc.style.display="grid";}
 }
 function refresh(){get("/api/state").then(function(s){if(s&&Object.keys(s).length)renderAll(s);});}
-function staffAlertForResident(){var el=document.getElementById("residentSelect");cmd("staff_alert",{priority:"urgent",residentId:(el&&el.value)||"",message:"Assistance requested for resident."});}
-function renderRoundPicker(res){
-  var el=document.getElementById("roundResidentPicker");if(!el)return;
-  if(!res.length){el.innerHTML='<div class="esbox" style="min-height:50px">No residents registered. Add them in the Residents section.</div>';return;}
-  var prev={};var cbs=document.querySelectorAll(".round-res-cb");for(var i=0;i<cbs.length;i++)prev[cbs[i].value]=cbs[i].checked;
-  el.innerHTML=res.map(function(r){
-    var chk=prev[r.id]===false?"":"checked";
-    return '<label style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f0f4fa;cursor:pointer">'+
-      '<input type="checkbox" class="round-res-cb" value="'+esc(r.id)+'" '+chk+' style="width:15px;height:15px;accent-color:#1a68e0;flex-shrink:0">'+
-      '<div style="flex:1"><div style="font-weight:600;font-size:13px">'+esc(r.name)+'</div>'+
-      '<div style="font-size:12px;color:#8898b0">Room '+esc(r.room)+(r.careLevel?' &middot; '+esc(r.careLevel):'')+'</div></div>'+
-      '<button class="btn s p" onclick="checkInResident(&#39;'+esc(r.id)+'&#39;)" style="flex-shrink:0">Go</button></label>';
-  }).join("");
-}
-function selectAllForRound(){var cbs=document.querySelectorAll(".round-res-cb");for(var i=0;i<cbs.length;i++)cbs[i].checked=true;}
-function startRound(){
-  var typeEl=document.getElementById("roundType");var roundType=typeEl?typeEl.value:"checkin";
-  var cbs=document.querySelectorAll(".round-res-cb");var selected=[];
-  for(var i=0;i<cbs.length;i++){if(cbs[i].checked)selected.push(cbs[i].value);}
-  var s=window._s;var allRes=(s&&s.care&&s.care.residents)||[];
-  var residents=selected.length?allRes.filter(function(r){for(var i=0;i<selected.length;i++){if(selected[i]===r.id)return true;}return false;}):allRes;
-  if(!residents.length)return notice("No residents selected. Add residents first.",false);
-  cmd("start_rounds",{type:roundType,residents:residents.map(function(r){return{id:r.id,name:r.name,room:r.room,mapPoint:r.mapPoint||r.room,checkInPrompt:r.checkInSchedule||""};})});
-}
-function refreshQueue(){
-  get("/api/queue").then(function(out){
-    var count=(out.queue&&out.queue.length)||0;
-    var qc=document.getElementById("queueCount");var ql=document.getElementById("queueList");var qb=document.getElementById("queueBadge");
-    if(qc){qc.textContent=count+" pending";qc.className="pill "+(count?"warn":"off");}
-    if(qb){if(count){qb.textContent=count;qb.style.display="inline-flex";}else qb.style.display="none";}
-    if(ql){if(!count){ql.innerHTML='<div class="esbox" style="min-height:50px">No pending commands. Robot is up to date.</div>';}
-    else{ql.innerHTML=(out.queue||[]).slice(0,10).map(function(c){return rRow("blue",c.action,new Date(c.at||Date.now()).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"}));}).join("")+(count>10?'<p style="font-size:12px;color:#8898b0;margin:8px 0 0">+'+(count-10)+" more</p>":'');}}
-  });
-}
-function clearQueue(){
-  fetch("/api/queue",{method:"DELETE"}).then(function(r){return r.json();}).then(function(out){
-    notice(out.ok?"Command queue cleared":(out.error||"Could not clear"),out.ok);refreshQueue();
-  });
-}
 setInterval(refresh,2000);setInterval(refreshQueue,4000);refresh();refreshQueue();loadUsers();
 document.querySelectorAll('.nav a[data-view]').forEach(function(a){
   a.addEventListener('click',function(e){e.preventDefault();sv(this.getAttribute('data-view'),this);});
@@ -787,10 +836,7 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/health") return sendJson(res, 200, { ok: true });
 
   if (url.pathname === "/login" && req.method === "GET") {
-    if (currentUser(req) || isAdmin(req)) {
-      res.writeHead(302, { location: "/", "cache-control": "no-store" });
-      return res.end();
-    }
+    if (currentUser(req) || isAdmin(req)) { res.writeHead(302, { location: "/", "cache-control": "no-store" }); return res.end(); }
     return sendText(res, 200, loginPage(), "text/html; charset=utf-8");
   }
   if (url.pathname === "/login" && req.method === "POST") {
@@ -800,26 +846,18 @@ const server = http.createServer(async (req, res) => {
       log("login_failed", { username: cleanText(form.username) });
       return sendText(res, 401, loginPage("Invalid username or password."), "text/html; charset=utf-8");
     }
-    createSession(res, user.username);
-    log("login", { username: user.username });
-    res.writeHead(302, { location: "/", "cache-control": "no-store" });
-    return res.end();
+    createSession(res, user.username); log("login", { username: user.username });
+    res.writeHead(302, { location: "/", "cache-control": "no-store" }); return res.end();
   }
   if (url.pathname === "/logout") {
-    const sid = parseCookies(req).nova_session;
-    if (sid) sessions.delete(sid);
-    res.writeHead(200, {
-      "set-cookie": "nova_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0",
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "no-store",
-    });
+    const sid = parseCookies(req).nova_session; if (sid) sessions.delete(sid);
+    res.writeHead(200, { "set-cookie": "nova_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0", "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
     return res.end(logoutPage());
   }
 
   if (url.pathname.startsWith("/robot/")) {
     if (!isRobot(req)) return sendJson(res, 403, { ok: false, error: "bad robot token" });
-    robot.online = true;
-    robot.lastSeen = Date.now();
+    robot.online = true; robot.lastSeen = Date.now();
     if (url.pathname === "/robot/state" && req.method === "POST") {
       const body = JSON.parse((await readBody(req)) || "{}");
       robot.status = body.status || robot.status;
@@ -828,13 +866,20 @@ const server = http.createServer(async (req, res) => {
       robot.points = Array.isArray(body.points) ? body.points : robot.points;
       robot.care = body.care || robot.care;
       if (body.cameraJpegBase64) robot.cameraJpegBase64 = body.cameraJpegBase64;
-      log("state", { people: robot.people.length, points: robot.points.length, camera: !!robot.cameraJpegBase64 });
+      log("state", { people: robot.people.length, points: robot.points.length });
       return sendJson(res, 200, { ok: true });
     }
     if (url.pathname === "/robot/poll") return sendJson(res, 200, { commands: commandQueue.splice(0, 20) });
     if (url.pathname === "/robot/result" && req.method === "POST") {
-      log("result", JSON.parse((await readBody(req)) || "{}"));
-      return sendJson(res, 200, { ok: true });
+      const data = JSON.parse((await readBody(req)) || "{}");
+      const p = data.params || {};
+      if (data.action === "resident_checkin" && p.residentId) facility.checkIns[p.residentId] = Date.now();
+      if (data.action === "start_rounds" && Array.isArray(p.residents)) {
+        p.residents.forEach(function(r) { if (r.id) facility.checkIns[r.id] = Date.now(); });
+        roundHistory.unshift({ id: crypto.randomUUID(), name: p.scheduleName || "Manual Round", type: p.type || "checkin", trigger: p.scheduleName ? "schedule" : "manual", count: p.residents.length, at: Date.now() });
+        if (roundHistory.length > 30) roundHistory.pop();
+      }
+      log("result", data); return sendJson(res, 200, { ok: true });
     }
   }
 
@@ -845,95 +890,74 @@ const server = http.createServer(async (req, res) => {
     const user = currentUser(req) || users.get(ADMIN_USER);
     return sendJson(res, 200, { ok: true, user: { username: user.username, role: user.role } });
   }
+  if (url.pathname === "/api/state") {
+    const stale = Date.now() - robot.lastSeen > 15000;
+    return sendJson(res, 200, { ...robot, online: robot.online && !stale, care: mergedCare(), camera: !!robot.cameraJpegBase64, events, scheduledRounds, roundHistory, facility: { roundOrder: facility.roundOrder, checkIns: facility.checkIns } });
+  }
+  if (url.pathname === "/api/camera.jpg") {
+    if (!robot.cameraJpegBase64) return sendText(res, 404, "No camera snapshot");
+    const data = Buffer.from(robot.cameraJpegBase64, "base64");
+    res.writeHead(200, { "content-type": "image/jpeg", "cache-control": "no-store", "content-length": data.length }); return res.end(data);
+  }
   if (url.pathname === "/api/users" && req.method === "GET") {
     if (!requireRole(req, res, "admin")) return;
-    return sendJson(res, 200, {
-      ok: true,
-      users: Array.from(users.values()).map((u) => ({ username: u.username, role: u.role, createdAt: u.createdAt })),
-    });
+    return sendJson(res, 200, { ok: true, users: Array.from(users.values()).map(u => ({ username: u.username, role: u.role, createdAt: u.createdAt })) });
   }
   if (url.pathname === "/api/users" && req.method === "POST") {
-    const actor = requireRole(req, res, "admin");
-    if (!actor) return;
+    const actor = requireRole(req, res, "admin"); if (!actor) return;
     const body = JSON.parse((await readBody(req)) || "{}");
-    const username = cleanText(body.username).toLowerCase();
-    const password = String(body.password || "");
-    const role = ["admin", "operator", "viewer"].includes(cleanText(body.role)) ? cleanText(body.role) : "operator";
+    const username = cleanText(body.username).toLowerCase(), password = String(body.password || "");
+    const role = ["admin","operator","viewer"].includes(cleanText(body.role)) ? cleanText(body.role) : "operator";
     if (!/^[a-z0-9._-]{3,40}$/.test(username)) return sendJson(res, 400, { ok: false, error: "username must be 3-40 letters, numbers, dot, dash, or underscore" });
     if (password.length < 8) return sendJson(res, 400, { ok: false, error: "password must be at least 8 characters" });
     users.set(username, { username, role, passwordHash: passwordHash(password), createdAt: Date.now() });
-    log("user_created", { username, role, actor: actor.username });
-    return sendJson(res, 200, { ok: true, user: { username, role } });
+    log("user_created", { username, role, actor: actor.username }); return sendJson(res, 200, { ok: true, user: { username, role } });
   }
   if (url.pathname === "/api/logo" && req.method === "POST") {
-    const actor = requireRole(req, res, "admin");
-    if (!actor) return;
+    const actor = requireRole(req, res, "admin"); if (!actor) return;
     const body = JSON.parse((await readBody(req)) || "{}");
     const dataUrl = String(body.dataUrl || "");
-    if (!/^data:image\/(png|jpg|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return sendJson(res, 400, { ok: false, error: "Upload a PNG, JPG, JPEG, or WEBP image." });
-    if (Buffer.byteLength(dataUrl) > 7_000_000) return sendJson(res, 413, { ok: false, error: "Logo is too large. Use an image under 5 MB." });
-    brandLogoDataUrl = dataUrl;
-    log("logo_updated", { actor: actor.username });
+    if (!/^data:image\/(png|jpg|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return sendJson(res, 400, { ok: false, error: "Upload PNG, JPG, or WEBP." });
+    if (Buffer.byteLength(dataUrl) > 7_000_000) return sendJson(res, 413, { ok: false, error: "Logo too large." });
+    brandLogoDataUrl = dataUrl; log("logo_updated", { actor: actor.username });
     return sendJson(res, 200, { ok: true, logo: brandLogoDataUrl });
   }
   if (url.pathname === "/templates/residents.csv") {
-    const example = [
-      residentColumns.join(","),
-      'R-204,"Mary Collins",204,Room 204,A,Assisted,"Sarah Collins","+1 555 0100","Morning medication at 09:00","Walker; avoid stairs",English,"daily 09:00","Call nurse if no response"',
-    ].join("\n");
-    res.writeHead(200, {
-      "content-type": "text/csv; charset=utf-8",
-      "content-disposition": 'attachment; filename="zox-resident-import-template.csv"',
-      "cache-control": "no-store",
-    });
+    const example = [residentColumns.join(","), 'R-204,"Mary Collins",204,Room 204,A,Assisted,"Sarah Collins","+1 555 0100","Morning medication at 09:00","Walker; avoid stairs",English,"daily 09:00","Call nurse if no response"'].join("\n");
+    res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "content-disposition": 'attachment; filename="zox-resident-import-template.csv"', "cache-control": "no-store" });
     return res.end(example);
-  }
-  if (url.pathname === "/api/state") {
-    const stale = Date.now() - robot.lastSeen > 15000;
-    return sendJson(res, 200, { ...robot, online: robot.online && !stale, care: mergedCare(), camera: !!robot.cameraJpegBase64, events });
-  }
-  if (url.pathname === "/api/camera.jpg") {
-    if (!robot.cameraJpegBase64) return sendText(res, 404, "No real camera snapshot from Nova");
-    const data = Buffer.from(robot.cameraJpegBase64, "base64");
-    res.writeHead(200, { "content-type": "image/jpeg", "cache-control": "no-store", "content-length": data.length });
-    return res.end(data);
   }
   if (url.pathname === "/api/residents" && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
     const resident = toResident(JSON.parse((await readBody(req)) || "{}"));
     if (!resident) return sendJson(res, 400, { ok: false, error: "full_name and room are required" });
-    const idx = facility.residents.findIndex((r) => r.id === resident.id);
-    if (idx >= 0) facility.residents[idx] = resident;
-    else facility.residents.push(resident);
-    facility.logs.push({ createdAt: Date.now(), title: "Resident registered", detail: `${resident.name} - ${resident.room}` });
-    commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "upsert_resident", params: {
-      id: resident.id, name: resident.name, room: resident.room, mapPoint: resident.mapPoint || resident.room,
-      notes: [resident.medicationNotes, resident.mobilityNotes].filter(Boolean).join("; "),
-      checkInPrompt: resident.checkInSchedule || `Hello ${resident.name}. I am checking in. Do you need anything?`
-    }});
-    log("resident", { id: resident.id, name: resident.name });
-    return sendJson(res, 200, { ok: true, resident });
+    const idx = facility.residents.findIndex(r => r.id === resident.id);
+    if (idx >= 0) facility.residents[idx] = resident; else facility.residents.push(resident);
+    facility.logs.push({ createdAt: Date.now(), title: "Resident saved", detail: `${resident.name} - ${resident.room}` });
+    commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "upsert_resident", params: { id: resident.id, name: resident.name, room: resident.room, mapPoint: resident.mapPoint || resident.room, notes: [resident.medicationNotes, resident.mobilityNotes].filter(Boolean).join("; "), checkInPrompt: resident.checkInSchedule || `Hello ${resident.name}. I am checking in. Do you need anything?` } });
+    log("resident", { id: resident.id, name: resident.name }); return sendJson(res, 200, { ok: true, resident });
   }
   if (url.pathname === "/api/residents/import" && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
     const rows = parseCsv(await readBody(req));
-    if (rows.length < 2) return sendJson(res, 400, { ok: false, error: "CSV must include a header row and at least one resident" });
-    const header = rows[0].map((v) => cleanText(v).toLowerCase());
+    if (rows.length < 2) return sendJson(res, 400, { ok: false, error: "CSV must have a header row and at least one resident" });
+    const header = rows[0].map(v => cleanText(v).toLowerCase());
     const imported = [];
-    rows.slice(1).forEach((cells) => {
-      const item = {};
-      header.forEach((key, i) => { item[key] = cells[i] || ""; });
-      const resident = toResident(item);
-      if (resident) imported.push(resident);
-    });
-    imported.forEach((resident) => {
-      const idx = facility.residents.findIndex((r) => r.id === resident.id);
-      if (idx >= 0) facility.residents[idx] = resident;
-      else facility.residents.push(resident);
-    });
+    rows.slice(1).forEach(cells => { const item = {}; header.forEach((k, i) => { item[k] = cells[i] || ""; }); const r = toResident(item); if (r) imported.push(r); });
+    imported.forEach(r => { const idx = facility.residents.findIndex(x => x.id === r.id); if (idx >= 0) facility.residents[idx] = r; else facility.residents.push(r); });
     facility.logs.push({ createdAt: Date.now(), title: "Resident import", detail: `${imported.length} residents imported` });
-    log("resident_import", { count: imported.length });
-    return sendJson(res, 200, { ok: true, count: imported.length, residents: facility.residents });
+    log("resident_import", { count: imported.length }); return sendJson(res, 200, { ok: true, count: imported.length });
+  }
+  const resDeleteMatch = url.pathname.match(/^\/api\/residents\/([^/]+)$/);
+  if (resDeleteMatch && req.method === "DELETE") {
+    if (!requireRole(req, res, "operator")) return;
+    const id = decodeURIComponent(resDeleteMatch[1]);
+    const idx = facility.residents.findIndex(r => r.id === id);
+    if (idx < 0) return sendJson(res, 404, { ok: false, error: "resident not found" });
+    const removed = facility.residents.splice(idx, 1)[0];
+    facility.logs.push({ createdAt: Date.now(), title: "Resident removed", detail: `${removed.name} — ${removed.room}` });
+    commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "delete_resident", params: { id: removed.id } });
+    log("resident_deleted", { id: removed.id, name: removed.name }); return sendJson(res, 200, { ok: true });
   }
   if (url.pathname === "/api/alerts" && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
@@ -942,8 +966,16 @@ const server = http.createServer(async (req, res) => {
     facility.alerts.unshift(alert);
     facility.logs.push({ createdAt: Date.now(), title: "Alert created", detail: `${alert.room || "Facility"} - ${alert.message}` });
     commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "staff_alert", params: alert });
-    log("alert", alert);
-    return sendJson(res, 200, { ok: true, alert });
+    log("alert", alert); return sendJson(res, 200, { ok: true, alert });
+  }
+  const alertDismissMatch = url.pathname.match(/^\/api\/alerts\/([^/]+)\/dismiss$/);
+  if (alertDismissMatch && req.method === "POST") {
+    if (!requireRole(req, res, "operator")) return;
+    const alertId = decodeURIComponent(alertDismissMatch[1]);
+    const idx = facility.alerts.findIndex(a => a.id === alertId);
+    if (idx >= 0) facility.alerts.splice(idx, 1);
+    facility.logs.push({ createdAt: Date.now(), title: "Alert dismissed", detail: alertId });
+    log("alert_dismissed", { id: alertId }); return sendJson(res, 200, { ok: true });
   }
   if (url.pathname === "/api/command" && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
@@ -952,39 +984,46 @@ const server = http.createServer(async (req, res) => {
     if (!command.action) return sendJson(res, 400, { ok: false, error: "action is required" });
     commandQueue.push(command);
     facility.logs.push({ createdAt: Date.now(), title: "Command queued", detail: `${command.action} ${JSON.stringify(command.params)}` });
-    log("command", command);
-    return sendJson(res, 200, { ok: true, command });
+    log("command", command); return sendJson(res, 200, { ok: true, command });
   }
-  const residentDeleteMatch = url.pathname.match(/^\/api\/residents\/([^/]+)$/);
-  if (residentDeleteMatch && req.method === "DELETE") {
-    if (!requireRole(req, res, "operator")) return;
-    const id = decodeURIComponent(residentDeleteMatch[1]);
-    const idx = facility.residents.findIndex((r) => r.id === id);
-    if (idx < 0) return sendJson(res, 404, { ok: false, error: "resident not found" });
-    const removed = facility.residents.splice(idx, 1)[0];
-    facility.logs.push({ createdAt: Date.now(), title: "Resident removed", detail: `${removed.name} — ${removed.room}` });
-    commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "delete_resident", params: { id: removed.id } });
-    log("resident_deleted", { id: removed.id, name: removed.name });
-    return sendJson(res, 200, { ok: true });
+  if (url.pathname === "/api/schedules" && req.method === "GET") {
+    return sendJson(res, 200, { ok: true, schedules: scheduledRounds });
   }
-  const alertDismissMatch = url.pathname.match(/^\/api\/alerts\/([^/]+)\/dismiss$/);
-  if (alertDismissMatch && req.method === "POST") {
+  if (url.pathname === "/api/schedules" && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
-    const alertId = decodeURIComponent(alertDismissMatch[1]);
-    const idx = facility.alerts.findIndex((a) => a.id === alertId);
-    if (idx >= 0) facility.alerts.splice(idx, 1);
-    facility.logs.push({ createdAt: Date.now(), title: "Alert dismissed", detail: alertId });
-    log("alert_dismissed", { id: alertId });
+    const body = JSON.parse((await readBody(req)) || "{}");
+    const name = cleanText(body.name); if (!name) return sendJson(res, 400, { ok: false, error: "name required" });
+    const schedule = { id: crypto.randomUUID(), name, type: ["checkin","medication","full"].includes(body.type) ? body.type : "checkin", time: /^\d{2}:\d{2}$/.test(body.time || "") ? body.time : "09:00", days: body.days || "daily", residentIds: Array.isArray(body.residentIds) ? body.residentIds : [], enabled: true, createdAt: Date.now(), lastRun: null };
+    scheduledRounds.push(schedule); log("schedule_created", { name }); return sendJson(res, 200, { ok: true, schedule });
+  }
+  const schedDeleteMatch = url.pathname.match(/^\/api\/schedules\/([^/]+)$/);
+  if (schedDeleteMatch && req.method === "DELETE") {
+    if (!requireRole(req, res, "operator")) return;
+    const id = decodeURIComponent(schedDeleteMatch[1]);
+    const idx = scheduledRounds.findIndex(s => s.id === id);
+    if (idx < 0) return sendJson(res, 404, { ok: false, error: "schedule not found" });
+    scheduledRounds.splice(idx, 1); return sendJson(res, 200, { ok: true });
+  }
+  const schedToggleMatch = url.pathname.match(/^\/api\/schedules\/([^/]+)\/toggle$/);
+  if (schedToggleMatch && req.method === "POST") {
+    if (!requireRole(req, res, "operator")) return;
+    const id = decodeURIComponent(schedToggleMatch[1]);
+    const s = scheduledRounds.find(s => s.id === id);
+    if (!s) return sendJson(res, 404, { ok: false, error: "schedule not found" });
+    s.enabled = !s.enabled; return sendJson(res, 200, { ok: true, enabled: s.enabled });
+  }
+  if (url.pathname === "/api/round-order" && req.method === "PUT") {
+    if (!requireRole(req, res, "operator")) return;
+    const body = JSON.parse((await readBody(req)) || "{}");
+    if (Array.isArray(body.order)) facility.roundOrder = body.order;
     return sendJson(res, 200, { ok: true });
   }
   if (url.pathname === "/api/queue" && req.method === "GET") {
-    return sendJson(res, 200, { ok: true, queue: commandQueue.map(function(c) { return { id: c.id, action: c.action, at: c.at }; }), count: commandQueue.length });
+    return sendJson(res, 200, { ok: true, queue: commandQueue.map(c => ({ id: c.id, action: c.action, at: c.at })), count: commandQueue.length });
   }
   if (url.pathname === "/api/queue" && req.method === "DELETE") {
     if (!requireRole(req, res, "admin")) return;
-    commandQueue.splice(0, commandQueue.length);
-    log("queue_cleared", {});
-    return sendJson(res, 200, { ok: true });
+    commandQueue.splice(0, commandQueue.length); log("queue_cleared", {}); return sendJson(res, 200, { ok: true });
   }
   sendJson(res, 404, { ok: false, error: "not found" });
 });
