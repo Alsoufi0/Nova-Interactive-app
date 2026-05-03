@@ -258,69 +258,267 @@ function page(user = users.get(ADMIN_USER)) {
   return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ZOX Robotics Care Cloud</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#f5f8fb;color:#101a33;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}.app{display:grid;grid-template-columns:260px 1fr;min-height:100vh}.side{background:linear-gradient(180deg,#051b34,#092544);color:white;padding:22px 16px;display:flex;flex-direction:column;gap:18px}.brand{display:flex;gap:12px;align-items:center}.logo{width:64px;height:64px;border-radius:16px;background:radial-gradient(circle at 50% 40%,#123963,#06172e 62%);border:2px solid #10c6e7;box-shadow:0 0 22px #10c6e755;display:grid;place-items:center;color:#1bd6ee;font-weight:950;font-size:22px;letter-spacing:-1px;overflow:hidden}.logo img{width:100%;height:100%;object-fit:cover}.brand b{font-size:20px}.tag{color:#36d7ee;font-size:10px;letter-spacing:2.2px;font-weight:900}.muted{color:#728198;font-size:13px}.side .muted{color:#b7c6d8}.nav{display:grid;gap:7px}.nav a{padding:13px 14px;border-radius:11px;color:white;text-decoration:none;cursor:pointer;font-weight:760}.nav a.active,.nav a:hover{background:#1d66ca}.sidebox{margin-top:auto;background:#ffffff10;border:1px solid #ffffff1f;border-radius:16px;padding:16px}.top{height:78px;background:white;border-bottom:1px solid #dfe7f1;display:flex;align-items:center;justify-content:space-between;padding:0 26px}.top h1{margin:0;font-size:24px}.topRight{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end}.content{padding:18px}.view{display:none}.view.active{display:block}.grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}.grid3{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:14px;margin-top:14px}.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{background:white;border:1px solid #dfe7f1;border-radius:16px;padding:16px;box-shadow:0 10px 28px #3451a012}.card h2{font-size:16px;margin:0 0 12px}.tile{border:0;border-radius:18px;min-height:145px;background:white;color:#08142f;box-shadow:0 12px 32px #2f4d7a18;font-weight:900;font-size:18px;cursor:pointer;padding:20px 12px}.tile span{display:grid;place-items:center;width:64px;height:64px;border-radius:50%;margin:0 auto 14px;color:white;font-size:22px}.green{background:#2f9e57}.blue{background:#2374e1}.yellow{background:#f2b51e}.red{background:#e95050}.purple{background:#8a55de}.cyan{background:#10bcd7}.status{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.stat{border:1px solid #e1e9f2;border-radius:14px;padding:14px}.stat b{font-size:26px;display:block}.pill{border-radius:999px;padding:5px 9px;font-size:12px;font-weight:850;display:inline-block}.ok{background:#e5f7e9;color:#238044}.bad{background:#ffe6e6;color:#c93131}.warn{background:#fff2d9;color:#b06a00}.low{background:#e8f1ff;color:#1e67c9}.row{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;border-bottom:1px solid #edf2f7;padding:11px 0}.dot{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;color:white;font-weight:900}.cmd{border:1px solid #d7e1ee;background:white;color:#14213d;border-radius:999px;padding:11px 16px;font-weight:850;cursor:pointer;margin:4px;text-decoration:none;display:inline-block}.cmd.primary{background:#2374e1;color:white;border-color:#2374e1}.cmd.danger{background:#e94d4d;color:white;border-color:#e94d4d}.cmd:disabled{opacity:.45;cursor:not-allowed}.field{width:100%;border:1px solid #d7e1ee;border-radius:12px;padding:12px;margin:6px 0;font:inherit}.map{height:280px;border-radius:14px;background:#eef5ff;border:1px solid #dce7f4;position:relative;overflow:hidden}.map.empty,.empty{display:grid;place-items:center;color:#667895;text-align:center;min-height:110px;border:1px dashed #cbd8e8;border-radius:14px;background:#f9fbfe;padding:18px}.room{position:absolute;border:2px solid #cbd9ea;border-radius:9px;padding:13px;color:#52627a;background:#ffffffbb}.pin{position:absolute;width:34px;height:34px;border:0;border-radius:50%;display:grid;place-items:center;color:white;font-weight:900;cursor:pointer}.camera{display:none;margin-top:12px}.camera img{width:100%;max-height:360px;object-fit:contain;background:#071426;border-radius:12px}.table{width:100%;border-collapse:collapse}.table td,.table th{text-align:left;padding:12px;border-bottom:1px solid #edf2f7;vertical-align:top}.small{font-size:12px}.toast{position:fixed;right:18px;bottom:18px;background:#071b34;color:white;padding:12px 16px;border-radius:12px;box-shadow:0 12px 28px #0003;display:none}.logoPreview{width:132px;height:132px;border-radius:24px;border:2px solid #10c6e7;background:#06172e;object-fit:cover;display:block;margin:8px 0}@media(max-width:1000px){.app{grid-template-columns:1fr}.side{display:none}.top{height:auto;padding:16px;align-items:flex-start;flex-direction:column}.grid5,.grid3,.status,.two{grid-template-columns:1fr}.content{padding:12px}}
+*{box-sizing:border-box}body{margin:0;background:#f0f4f8;color:#101a33;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}
+.app{display:grid;grid-template-columns:260px 1fr;min-height:100vh}
+.side{background:linear-gradient(180deg,#051b34,#092544);color:white;padding:22px 16px;display:flex;flex-direction:column;gap:18px;position:sticky;top:0;height:100vh;overflow-y:auto}
+.brand{display:flex;gap:12px;align-items:center}
+.logo{width:60px;height:60px;border-radius:14px;background:radial-gradient(circle at 50% 40%,#123963,#06172e 62%);border:2px solid #10c6e7;box-shadow:0 0 20px #10c6e744;display:grid;place-items:center;color:#1bd6ee;font-weight:950;font-size:20px;letter-spacing:-1px;overflow:hidden;flex-shrink:0}
+.logo img{width:100%;height:100%;object-fit:cover}
+.brand-text b{font-size:18px;font-weight:800;display:block}.brand-text .tag{color:#36d7ee;font-size:10px;letter-spacing:2.2px;font-weight:700}
+.muted{color:#728198;font-size:13px}.side .muted{color:#a8bcd4}
+.nav{display:grid;gap:4px}
+.nav a{padding:11px 14px;border-radius:10px;color:#c8d8ec;text-decoration:none;cursor:pointer;font-weight:600;font-size:14px;transition:background .15s,color .15s}
+.nav a.active{background:#1d66ca;color:white}.nav a:hover:not(.active){background:#ffffff14;color:white}
+.sidebox{margin-top:auto;background:#ffffff0e;border:1px solid #ffffff1a;border-radius:14px;padding:14px}
+.sidebox b{font-size:14px;font-weight:700}
+.top{height:72px;background:white;border-bottom:1px solid #e4eaf2;display:flex;align-items:center;justify-content:space-between;padding:0 24px;position:sticky;top:0;z-index:10;box-shadow:0 1px 0 #e4eaf2}
+.top h1{margin:0;font-size:20px;font-weight:800}
+.topRight{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.content{padding:20px}
+.view{display:none}.view.active{display:block}
+.grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+.grid3{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:14px;margin-top:14px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.card{background:white;border:1px solid #e4eaf2;border-radius:16px;padding:18px;box-shadow:0 2px 12px #3451a008}
+.card h2{font-size:11px;font-weight:700;margin:0 0 14px;color:#8a9db8;text-transform:uppercase;letter-spacing:.8px}
+.tile{border:0;border-radius:16px;min-height:130px;background:white;color:#08142f;box-shadow:0 4px 20px #2f4d7a10;font-weight:800;font-size:16px;cursor:pointer;padding:18px 10px;transition:transform .12s,box-shadow .12s;border:1px solid #e8eef6}
+.tile:hover{transform:translateY(-2px);box-shadow:0 8px 28px #2f4d7a1c}
+.tile span{display:grid;place-items:center;width:52px;height:52px;border-radius:12px;margin:0 auto 12px;color:white;font-size:20px}
+.green{background:#28a155}.blue{background:#1f6fe8}.yellow{background:#e0a816}.red{background:#e04646}.purple{background:#8050d8}.cyan{background:#0ebad0}
+.status{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.stat{border:1px solid #e4eaf2;border-radius:12px;padding:12px 14px;background:white}
+.stat .sl{font-size:11px;color:#8a9db8;font-weight:600;text-transform:uppercase;letter-spacing:.5px;display:block}
+.stat b{font-size:24px;display:block;margin-top:4px;font-weight:800}
+.pill{border-radius:999px;padding:4px 10px;font-size:11px;font-weight:700;display:inline-block}
+.ok{background:#e4f7ec;color:#1a7a3c}.bad{background:#fde8e8;color:#c02828}.warn{background:#fff3d6;color:#9a5c00}.low{background:#e4eeff;color:#1855c4}
+.row{display:flex;gap:10px;align-items:center;border-bottom:1px solid #f2f5f9;padding:10px 0}
+.row:last-child{border-bottom:0}
+.dot{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;color:white;font-weight:800;flex-shrink:0;font-size:15px}
+.rb{flex:1;min-width:0}.rb b{display:block;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rb span{display:block;font-size:12px;color:#8a9db8;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ra{display:flex;gap:4px;flex-shrink:0;align-items:center}
+.cmd{border:1px solid #d8e2ee;background:white;color:#14213d;border-radius:999px;padding:8px 14px;font-weight:700;font-size:13px;cursor:pointer;margin:3px;text-decoration:none;display:inline-block;transition:background .12s,border-color .12s}
+.cmd:hover{background:#f0f4fa}.cmd.primary{background:#1f6fe8;color:white;border-color:#1f6fe8}.cmd.primary:hover{background:#1860d0}
+.cmd.danger{background:#e04646;color:white;border-color:#e04646}.cmd.danger:hover{background:#c83c3c}
+.cmd.sm{padding:5px 11px;font-size:12px}
+.cmd:disabled{opacity:.4;cursor:not-allowed}
+.field{width:100%;border:1px solid #d8e2ee;border-radius:10px;padding:10px 13px;margin:4px 0;font:inherit;font-size:14px;color:#101a33;outline:none;transition:border-color .15s,box-shadow .15s}
+.field:focus{border-color:#1f6fe8;box-shadow:0 0 0 3px #1f6fe812}
+.map{height:260px;border-radius:14px;background:linear-gradient(135deg,#eaf2ff,#d8e8f6);border:1px solid #ccdaee;position:relative;overflow:hidden}
+.map.empty,.es{display:grid;place-items:center;color:#8a9db8;text-align:center;min-height:100px;border:1.5px dashed #c8d8ea;border-radius:12px;background:#f7fafd;padding:20px;font-size:13px}
+.pin{position:absolute;width:30px;height:30px;border:0;border-radius:8px;display:grid;place-items:center;color:white;font-weight:900;cursor:pointer;font-size:12px;transition:transform .1s}
+.pin:hover{transform:scale(1.2)}
+.camera{display:none;margin-top:10px}.camera img{width:100%;max-height:340px;object-fit:contain;background:#071426;border-radius:10px}
+.table{width:100%;border-collapse:collapse}
+.table td,.table th{text-align:left;padding:10px 12px;border-bottom:1px solid #f0f4f8;vertical-align:top;font-size:13px}
+.table th{font-size:11px;font-weight:700;color:#8a9db8;text-transform:uppercase;letter-spacing:.5px}
+.small{font-size:12px}
+.toast{position:fixed;right:18px;bottom:22px;background:#0d1f38;color:white;padding:12px 18px;border-radius:12px;box-shadow:0 8px 28px #0004;display:none;font-weight:600;font-size:14px;z-index:100}
+.logoPreview{width:110px;height:110px;border-radius:18px;border:2px solid #10c6e7;background:#06172e;object-fit:cover;display:block;margin:8px 0}
+.fs{background:#f7fafd;border-radius:12px;padding:14px;margin-bottom:10px}
+.fl{font-size:11px;font-weight:700;color:#6880a0;text-transform:uppercase;letter-spacing:.5px;display:block;margin:8px 0 2px}
+.inrow{display:flex;gap:8px}.inrow .inw{flex:1}
+.ac{border:1px solid #fdc8c8;border-radius:12px;padding:12px 14px;background:#fff6f6;margin-bottom:8px;display:flex;align-items:flex-start;gap:10px}
+.ac.std{border-color:#fde8b8;background:#fffbf0}
+.adot{width:34px;height:34px;border-radius:9px;background:#e04646;color:white;display:grid;place-items:center;font-weight:900;flex-shrink:0;font-size:16px}
+.adot.std{background:#e0a816}
+.ab{flex:1;min-width:0}.ab b{font-weight:700;font-size:14px;display:block}.ab span{font-size:12px;color:#8a9db8;display:block;margin-top:2px}
+.aa{display:flex;gap:4px;flex-shrink:0}
+@media(max-width:1000px){.app{grid-template-columns:1fr}.side{display:none;position:static;height:auto}.top{height:auto;padding:14px;flex-direction:column;align-items:flex-start;position:static}.grid5,.grid3,.status,.two{grid-template-columns:1fr}.content{padding:12px}}
 </style></head><body><div class="app">
-<aside class="side"><div class="brand"><div class="logo" id="sideLogo">${brandLogoDataUrl ? `<img src="${brandLogoDataUrl}" alt="ZOX Robotics">` : "ZOX"}</div><div><b>ZOX Robotics</b><br><span class="tag">SMART ROBOTS. BETTER CARE.</span></div></div><nav class="nav">
-<a class="active" onclick="switchView('command',this)">Command</a><a onclick="switchView('robots',this)">Robot Feeds</a><a onclick="switchView('rounds',this)">Rounds</a><a onclick="switchView('residents',this)">Residents</a><a onclick="switchView('alerts',this)">Alerts</a><a onclick="switchView('map',this)">Map</a><a onclick="switchView('logs',this)">Logs</a><a onclick="switchView('settings',this)">Settings</a>
-</nav><div class="sidebox"><b>Nova Online</b><span id="sideOnline" style="float:right">0/1</span><p class="muted" id="sideHealth">Waiting for real robot feed</p><button class="cmd primary" onclick="cmd('camera_start')">Open Camera</button></div></aside>
-<main><header class="top"><div><h1 id="pageTitle">Clinic Command Center</h1><div class="muted" id="pageSubtitle">Every number here is live from Nova or your registered facility data.</div></div><div class="topRight"><span class="pill low">${cleanText(user?.username || ADMIN_USER)} · ${cleanText(user?.role || "admin")}</span><span class="pill" id="onlinePill">Offline</span> <span class="pill bad" id="alertCount">0 alerts</span><a class="cmd" href="/logout">Logout</a></div></header>
-<section class="content view active" id="view-command">
-<div class="grid5"><button class="tile" onclick="cmd('start_rounds')"><span class="green">R</span>Start Rounds</button><button class="tile" onclick="checkInSelected()"><span class="blue">C</span>Check-In</button><button class="tile" onclick="medSelected()"><span class="yellow">M</span>Medication</button><button class="tile" onclick="staffAlert()"><span class="red">!</span>Staff Alert</button><button class="tile" onclick="guideSelected()"><span class="purple">G</span>Guide</button></div>
-<div class="card" style="margin-top:14px"><div class="status"><div class="stat"><span class="muted">Robot</span><b id="statRobot">0</b></div><div class="stat"><span class="muted">Residents</span><b id="statResidents">0</b></div><div class="stat"><span class="muted">Map Points</span><b id="statPoints">0</b></div><div class="stat"><span class="muted">People Seen</span><b id="statPeople">0</b></div><div class="stat"><span class="muted">Camera</span><b id="statCamera">Off</b></div></div></div>
-<div class="grid3"><div class="card"><h2>Robot</h2><div id="robotBox"></div><button class="cmd danger" onclick="cmd('stop')">Stop</button><button class="cmd" onclick="cmd('charge')">Charge</button><button class="cmd" onclick="cmd('security_start')">Detect</button><button class="cmd" onclick="cmd('security_stop')">End Detect</button></div><div class="card"><h2>Residents</h2><div id="residentBox"></div></div><div class="card"><h2>Alerts</h2><div id="alertBox"></div></div></div>
-<div class="grid3"><div class="card"><h2>People Detection</h2><div id="peopleBox"></div></div><div class="card"><h2>Map</h2><div class="map" id="mapBox"></div></div><div class="card"><h2>Camera</h2><button class="cmd primary" onclick="cmd('camera_start')">Open</button><button class="cmd" onclick="cmd('camera_stop')">Close</button><div class="camera" id="cameraBox"><img id="camera" alt="Nova camera feed"><p class="muted" id="cameraNote"></p></div><div id="noCamera" class="empty">No live camera frame from Nova yet.</div></div></div>
+<aside class="side">
+<div class="brand"><div class="logo" id="sideLogo">${brandLogoDataUrl ? `<img src="${brandLogoDataUrl}" alt="ZOX Robotics">` : "ZOX"}</div><div class="brand-text"><b>ZOX Robotics</b><span class="tag">SMART ROBOTS. BETTER CARE.</span></div></div>
+<nav class="nav">
+<a class="active" onclick="sv('command',this)">Command Center</a>
+<a onclick="sv('robots',this)">Robot Feeds</a>
+<a onclick="sv('rounds',this)">Care Rounds</a>
+<a onclick="sv('residents',this)">Residents</a>
+<a onclick="sv('alerts',this)">Alerts</a>
+<a onclick="sv('map',this)">Map &amp; Messaging</a>
+<a onclick="sv('logs',this)">Operations Log</a>
+<a onclick="sv('settings',this)">Settings</a>
+</nav>
+<div class="sidebox">
+<b>Nova Robot</b><span id="sideOnline" style="float:right;font-size:13px">0/1</span>
+<p class="muted" id="sideHealth" style="margin:6px 0 10px">Waiting for robot</p>
+<button class="cmd primary" style="width:100%;margin:0" onclick="cmd('camera_start')">Open Camera</button>
+</div>
+</aside>
+<main style="display:flex;flex-direction:column;min-height:100vh;overflow:hidden">
+<header class="top">
+<div><h1 id="pageTitle">Command Center</h1><div class="muted" id="pageSubtitle">Live data from Nova and your facility registry.</div></div>
+<div class="topRight"><span class="pill low">${cleanText(user?.username || ADMIN_USER)} &middot; ${cleanText(user?.role || "admin")}</span><span class="pill" id="onlinePill">Offline</span><span class="pill bad" id="alertCount">0 alerts</span><a class="cmd" href="/logout">Sign Out</a></div>
+</header>
+<div class="content" style="flex:1;overflow-y:auto">
+<section class="view active" id="view-command">
+<div class="grid5">
+<button class="tile" onclick="cmd('start_rounds')"><span class="green">&#8635;</span>Start Rounds</button>
+<button class="tile" onclick="checkInSelected()"><span class="blue">&#10003;</span>Check-In</button>
+<button class="tile" onclick="medSelected()"><span class="yellow">&#9670;</span>Medication</button>
+<button class="tile" onclick="staffAlert()"><span class="red">!</span>Staff Alert</button>
+<button class="tile" onclick="guideSelected()"><span class="purple">&#8594;</span>Guide Visitor</button>
+</div>
+<div class="card" style="margin-top:14px"><div class="status">
+<div class="stat"><span class="sl">Robot</span><b id="statRobot">0</b></div>
+<div class="stat"><span class="sl">Residents</span><b id="statResidents">0</b></div>
+<div class="stat"><span class="sl">Map Points</span><b id="statPoints">0</b></div>
+<div class="stat"><span class="sl">People Seen</span><b id="statPeople">0</b></div>
+<div class="stat"><span class="sl">Camera</span><b id="statCamera">Off</b></div>
+</div></div>
+<div class="grid3">
+<div class="card"><h2>Robot Status</h2><div id="robotBox"></div><div style="margin-top:10px;display:flex;flex-wrap:wrap"><button class="cmd danger sm" onclick="cmd('stop')">Stop</button><button class="cmd sm" onclick="cmd('charge')">Charge</button><button class="cmd sm" onclick="cmd('security_start')">Detect</button><button class="cmd sm" onclick="cmd('security_stop')">End Detect</button></div></div>
+<div class="card"><h2>Residents</h2><div id="residentBox"></div></div>
+<div class="card"><h2>Active Alerts</h2><div id="alertBox"></div></div>
+</div>
+<div class="grid3">
+<div class="card"><h2>People Detection</h2><div id="peopleBox"></div></div>
+<div class="card"><h2>Map</h2><div class="map" id="mapBox"></div></div>
+<div class="card"><h2>Camera</h2><div style="display:flex;gap:6px;margin-bottom:8px"><button class="cmd primary sm" onclick="cmd('camera_start')">Open</button><button class="cmd sm" onclick="cmd('camera_stop')">Close</button></div><div class="camera" id="cameraBox"><img id="camera" alt="Nova camera"><p class="muted" id="cameraNote"></p></div><div id="noCamera" class="es">No camera frame from Nova yet.</div></div>
+</div>
 </section>
-<section class="content view" id="view-robots"><div class="two"><div class="card"><h2>Real Robot Telemetry</h2><div id="robotsFleet"></div><button class="cmd danger" onclick="cmd('stop')">Emergency Stop</button><button class="cmd" onclick="cmd('charge')">Go Charge</button><button class="cmd primary" onclick="cmd('camera_start')">Open Camera</button></div><div class="card"><h2>Detection Feed</h2><div id="robotDiagnostics"></div><pre class="small" id="rawDetection"></pre></div></div></section>
-<section class="content view" id="view-rounds"><div class="two"><div class="card"><h2>Round Launcher</h2><button class="tile" onclick="cmd('start_rounds')"><span class="green">R</span>Start Care Round</button><div id="roundResidents"></div></div><div class="card"><h2>Round Schedule</h2><div id="roundSchedule"></div></div></div></section>
-<section class="content view" id="view-residents"><div class="two"><div class="card"><h2>Register Residents</h2><input class="field" id="manualName" placeholder="Full name"><input class="field" id="manualRoom" placeholder="Room"><input class="field" id="manualWing" placeholder="Wing"><input class="field" id="manualCare" placeholder="Care level"><input class="field" id="manualPhone" placeholder="Primary contact phone"><textarea class="field" id="manualNotes" rows="3" placeholder="Medication, mobility, emergency notes"></textarea><button class="cmd primary" onclick="addResident()">Add Resident</button><a class="cmd" href="/templates/residents.csv">Download Excel Template</a><input class="field" type="file" id="residentFile" accept=".csv,text/csv"><button class="cmd" onclick="uploadResidents()">Upload Excel CSV</button><p class="muted">Open the downloaded CSV in Excel, fill one resident per row, save as CSV, then upload here.</p></div><div class="card"><h2>Resident Directory</h2><div id="residentDirectory"></div><h2>Resident Actions</h2><select class="field" id="residentSelect"></select><button class="cmd primary" onclick="checkInSelected()">Check In</button><button class="cmd" onclick="medSelected()">Medication</button><button class="cmd danger" onclick="cmd('staff_alert',{priority:'urgent',residentId:residentSelect.value,message:'Assistance requested for resident.'})">Alert Staff</button></div></div></section>
-<section class="content view" id="view-alerts"><div class="two"><div class="card"><h2>Alert Center</h2><div id="alertCenter"></div></div><div class="card"><h2>Create Alert</h2><input class="field" id="alertRoom" placeholder="Room or location"><textarea class="field" id="alertMessage" rows="4" placeholder="What happened?"></textarea><button class="cmd danger" onclick="createAlert()">Send Urgent Alert</button></div></div></section>
-<section class="content view" id="view-map"><div class="two"><div class="card"><h2>Nova Map Points</h2><div class="map" id="fullMapBox"></div></div><div class="card"><h2>Destination Control</h2><select class="field" id="pointSelect"></select><button class="cmd primary" onclick="guideSelected()">Guide Visitor</button><textarea class="field" id="messageText" rows="4" placeholder="Message Nova should deliver"></textarea><button class="cmd" onclick="sendMessage()">Send Message To Point</button></div></div></section>
-<section class="content view" id="view-logs"><div class="card"><h2>Operations Log</h2><table class="table"><thead><tr><th>Time</th><th>Event</th><th>Detail</th><th>Status</th></tr></thead><tbody id="opsLog"></tbody></table></div></section>
-<section class="content view" id="view-settings"><div class="two"><div class="card"><h2>Cloud Relay</h2><div id="settingsRelay"></div><button class="cmd primary" onclick="cmd('camera_start')">Test Camera Command</button><button class="cmd" onclick="cmd('security_start')">Test Detection Command</button><h2>Brand Logo</h2><img class="logoPreview" id="logoPreview" src="${brandLogoDataUrl || ""}" alt="ZOX Robotics logo"><input class="field" id="logoFile" type="file" accept="image/png,image/jpeg,image/webp"><button class="cmd primary" onclick="uploadLogo()">Use Uploaded Logo</button><p class="muted">Upload the exact ZOX logo image here. It will replace the cloud logo immediately.</p></div><div class="card"><h2>User Access</h2><input class="field" id="newUser" placeholder="Username"><input class="field" id="newPass" type="password" placeholder="Temporary password"><select class="field" id="newRole"><option value="operator">operator</option><option value="viewer">viewer</option><option value="admin">admin</option></select><button class="cmd primary" onclick="addUser()">Add User</button><div id="userList"></div><h2>Excel Format</h2><table class="table small"><tbody id="formatRows"></tbody></table><a class="cmd" href="/templates/residents.csv">Download Template</a></div></div></section>
-</main></div><div class="toast" id="toast"></div><script>
-const titles={command:["Clinic Command Center","Every number here is live from Nova or your registered facility data."],robots:["Robot Feeds","Telemetry, camera, people detection, SDK and map feed from Nova."],rounds:["Rounds","Launch care rounds and check registered residents."],residents:["Residents","Register by form or Excel CSV upload, then command Nova by resident."],alerts:["Alerts","Create urgent staff alerts and monitor real robot/facility events."],map:["Map","Uses only real map points reported by Nova."],logs:["Logs","Cloud commands, robot state pushes, robot results and facility actions."],settings:["Settings","Relay health, safety controls and resident import format."]};
+<section class="view" id="view-robots"><div class="two">
+<div class="card"><h2>Robot Telemetry</h2><div id="robotsFleet"></div><div style="margin-top:12px;display:flex;flex-wrap:wrap"><button class="cmd danger sm" onclick="cmd('stop')">Emergency Stop</button><button class="cmd sm" onclick="cmd('charge')">Go Charge</button><button class="cmd primary sm" onclick="cmd('camera_start')">Camera</button></div></div>
+<div class="card"><h2>Detection Feed</h2><div id="robotDiagnostics"></div><pre class="small" id="rawDetection" style="background:#f7fafd;border-radius:8px;padding:10px;margin-top:10px;overflow:auto;max-height:240px;font-size:11px"></pre></div>
+</div></section>
+<section class="view" id="view-rounds"><div class="two">
+<div class="card"><h2>Launch Rounds</h2><button class="tile" style="width:100%;min-height:90px;margin-bottom:14px" onclick="cmd('start_rounds')"><span class="green" style="display:inline-flex;width:38px;height:38px;margin-right:8px">&#8635;</span>Start Care Round</button><h2>Residents</h2><div id="roundResidents"></div></div>
+<div class="card"><h2>Reminders</h2><div id="roundSchedule"></div></div>
+</div></section>
+<section class="view" id="view-residents"><div class="two">
+<div class="card">
+<h2 id="resFormTitle">Add Resident</h2>
+<div class="fs">
+<label class="fl">Full Name *</label><input class="field" id="manualName" placeholder="e.g. Mary Collins">
+<div class="inrow"><div class="inw"><label class="fl">Room *</label><input class="field" id="manualRoom" placeholder="204"></div><div class="inw"><label class="fl">Map Point</label><input class="field" id="manualMapPoint" placeholder="Room 204"></div></div>
+<div class="inrow"><div class="inw"><label class="fl">Wing</label><input class="field" id="manualWing" placeholder="A"></div><div class="inw"><label class="fl">Care Level</label><input class="field" id="manualCare" placeholder="Assisted"></div></div>
+<label class="fl">Contact Phone</label><input class="field" id="manualPhone" placeholder="+1 555 0100">
+<label class="fl">Care Notes (medication, mobility, emergency)</label><textarea class="field" id="manualNotes" rows="3" placeholder="Morning medication at 09:00..."></textarea>
+<label class="fl">Check-in Prompt (what Nova says on arrival)</label><input class="field" id="manualPrompt" placeholder="Hello, I am checking in. Do you need anything?">
+</div>
+<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="cmd primary" id="saveResBtn" onclick="saveResident()">Add Resident</button><button class="cmd danger sm" id="cancelEditBtn" style="display:none" onclick="cancelEdit()">Cancel</button></div>
+<p class="muted" style="margin:12px 0 4px;font-weight:700">Import via CSV</p>
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"><a class="cmd sm" href="/templates/residents.csv">Download Template</a></div>
+<input class="field" type="file" id="residentFile" accept=".csv,text/csv">
+<button class="cmd sm" onclick="uploadResidents()" style="margin-top:4px">Upload CSV</button>
+<p class="muted" style="margin-top:6px">Fill the template in Excel, save as CSV, then upload here.</p>
+</div>
+<div class="card">
+<h2>Resident Directory</h2>
+<div id="residentDirectory"></div>
+<p class="muted" style="margin:12px 0 6px;font-weight:700">Quick Command</p>
+<select class="field" id="residentSelect" style="margin-bottom:8px"></select>
+<div style="display:flex;flex-wrap:wrap;gap:6px"><button class="cmd primary sm" onclick="checkInSelected()">Check In</button><button class="cmd sm" onclick="medSelected()">Medication</button><button class="cmd danger sm" onclick="cmd('staff_alert',{priority:'urgent',residentId:residentSelect.value,message:'Assistance requested for resident.'})">Alert Staff</button></div>
+</div>
+</div></section>
+<section class="view" id="view-alerts"><div class="two">
+<div class="card"><h2>Active Alerts</h2><div id="alertCenter"></div></div>
+<div class="card"><h2>Create Alert</h2>
+<label class="fl">Room or Location</label><input class="field" id="alertRoom" placeholder="Room 204, Lobby, Corridor B...">
+<label class="fl">What happened?</label><textarea class="field" id="alertMessage" rows="4" placeholder="Describe the situation..."></textarea>
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+<button class="cmd danger" onclick="createAlert('urgent')">Urgent Alert</button>
+<button class="cmd" onclick="createAlert('standard')">Standard Alert</button>
+</div>
+</div>
+</div></section>
+<section class="view" id="view-map"><div class="two">
+<div class="card"><h2>Nova Map Points</h2><div class="map" id="fullMapBox"></div></div>
+<div class="card"><h2>Destination Control</h2>
+<label class="fl">Select Map Point</label><select class="field" id="pointSelect"></select>
+<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"><button class="cmd primary" onclick="guideSelected()">Guide Visitor Here</button></div>
+<label class="fl" style="margin-top:14px">Message to Deliver</label><textarea class="field" id="messageText" rows="3" placeholder="Message Nova should speak at this location"></textarea>
+<button class="cmd" style="margin-top:4px" onclick="sendMessage()">Send Message to Point</button>
+</div>
+</div></section>
+<section class="view" id="view-logs">
+<div class="card"><h2>Operations Log</h2>
+<table class="table"><thead><tr><th>Time</th><th>Event</th><th>Detail</th><th>Status</th></tr></thead><tbody id="opsLog"></tbody></table>
+</div>
+</section>
+<section class="view" id="view-settings"><div class="two">
+<div class="card"><h2>Cloud Relay</h2><div id="settingsRelay"></div>
+<div style="margin-top:12px;display:flex;flex-wrap:wrap"><button class="cmd primary sm" onclick="cmd('camera_start')">Test Camera</button><button class="cmd sm" onclick="cmd('security_start')">Test Detection</button></div>
+<p class="muted" style="margin:14px 0 4px;font-weight:700">Brand Logo</p>
+<img class="logoPreview" id="logoPreview" src="${brandLogoDataUrl || ""}" alt="ZOX Robotics logo">
+<input class="field" id="logoFile" type="file" accept="image/png,image/jpeg,image/webp" style="margin-top:6px">
+<button class="cmd primary sm" onclick="uploadLogo()" style="margin-top:4px">Upload Logo</button>
+<p class="muted">PNG/JPG under 5 MB.</p>
+</div>
+<div class="card"><h2>User Access</h2>
+<div class="fs">
+<label class="fl">Username</label><input class="field" id="newUser" placeholder="Username (3-40 chars)">
+<label class="fl">Password</label><input class="field" id="newPass" type="password" placeholder="Min 8 characters">
+<label class="fl">Role</label><select class="field" id="newRole"><option value="operator">operator</option><option value="viewer">viewer</option><option value="admin">admin</option></select>
+<button class="cmd primary sm" style="margin-top:6px" onclick="addUser()">Add User</button>
+</div>
+<div id="userList"></div>
+<p class="muted" style="margin:14px 0 4px;font-weight:700">CSV Column Format</p>
+<table class="table small"><tbody id="formatRows"></tbody></table>
+<a class="cmd sm" href="/templates/residents.csv" style="margin-top:8px;display:inline-block">Download Template</a>
+</div>
+</div></section>
+</div>
+</main>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const titles={command:["Command Center","Live data from Nova and your facility registry."],robots:["Robot Feeds","Telemetry, camera, people detection and SDK feed from Nova."],rounds:["Care Rounds","Launch rounds and check-in with registered residents."],residents:["Residents","Register residents by form or CSV, then send Nova on check-ins."],alerts:["Alerts","Create urgent staff alerts and monitor real-time facility events."],map:["Map &amp; Messaging","Live map points from Nova. Click a pin or select a point to guide a visitor or send a message."],logs:["Operations Log","Cloud commands, robot state pushes, results and facility actions."],settings:["Settings","Relay health, user management, brand logo and CSV import format."]};
 const columns=${JSON.stringify(residentColumns)};
-const currentUser=${JSON.stringify({ username: user?.username || ADMIN_USER, role: user?.role || "admin" })};
 async function get(p){const r=await fetch(p,{cache:"no-store"});return r.json()}
 async function post(p,body){const r=await fetch(p,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});return r.json()}
-async function cmd(action,params={}){const out=await post("/api/command",{action,params});notice(out.ok?"Command queued":"Command failed");refresh()}
+async function cmd(action,params={}){const out=await post("/api/command",{action,params});notice(out.ok?"Command queued":"Error: "+(out.error||"failed"));refresh()}
 function esc(v){return String(v||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
-function notice(t){toast.textContent=t;toast.style.display="block";setTimeout(()=>toast.style.display="none",2200)}
-function switchView(name,el){document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));document.getElementById("view-"+name).classList.add("active");document.querySelectorAll(".nav a").forEach(a=>a.classList.remove("active"));if(el)el.classList.add("active");pageTitle.textContent=titles[name][0];pageSubtitle.textContent=titles[name][1]}
-function row(color,title,detail,right=""){return '<div class="row"><div class="dot '+color+'">'+(esc(title)[0]||"?")+'</div><div><b>'+esc(title)+'</b><br><span class="muted">'+esc(detail)+'</span></div><div>'+right+'</div></div>'}
-function empty(text){return '<div class="empty">'+esc(text)+'</div>'}
-function residentById(id){return (window.state?.care?.residents||[]).find(r=>r.id===id)||null}
-function residentParams(id){const r=residentById(id||residentSelect.value);return r?{residentId:r.id,residentName:r.name,room:r.room,mapPoint:r.mapPoint||r.room,notes:r.medicationNotes||r.mobilityNotes||r.emergencyNotes||""}:{residentId:id||""}}
-function selectedResident(){return residentSelect.value||""}
-function selectedPoint(){return pointSelect.value||""}
-function checkInResident(id){if(!id)return notice("Register/select a resident first."); cmd("resident_checkin",residentParams(id))}
-function medResident(id){if(!id)return notice("Register/select a resident first."); cmd("med_reminder",residentParams(id))}
-function checkInSelected(){checkInResident(selectedResident())}
-function medSelected(){medResident(selectedResident())}
-function guideSelected(){const p=selectedPoint(); if(!p)return notice("Nova has not sent map points yet."); cmd("visitor_guide",{destination:p})}
+function notice(t){toast.textContent=t;toast.style.display="block";setTimeout(()=>toast.style.display="none",2600)}
+function sv(name,el){document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));document.getElementById("view-"+name).classList.add("active");document.querySelectorAll(".nav a").forEach(a=>a.classList.remove("active"));if(el)el.classList.add("active");pageTitle.innerHTML=titles[name][0];pageSubtitle.innerHTML=titles[name][1]}
+function rr(color,title,detail,right=""){return '<div class="row"><div class="dot '+color+'">'+esc(String(title||"?")[0].toUpperCase())+'</div><div class="rb"><b>'+esc(title)+'</b><span>'+esc(detail)+'</span></div><div class="ra">'+right+'</div></div>'}
+function es(text){return '<div class="es">'+esc(text)+'</div>'}
+function residentById(id){return (window._s?.care?.residents||[]).find(r=>r.id===id)||null}
+function residentParams(id){const r=residentById(id||residentSelect.value);return r?{residentId:r.id,residentName:r.name,room:r.room,mapPoint:r.mapPoint||r.room,notes:[r.medicationNotes,r.mobilityNotes,r.emergencyNotes].filter(Boolean).join("; "),checkInPrompt:r.checkInSchedule||""}:{residentId:id||""}}
+function checkInResident(id){if(!id)return notice("Select a resident first.");cmd("resident_checkin",residentParams(id))}
+function medResident(id){if(!id)return notice("Select a resident first.");cmd("med_reminder",residentParams(id))}
+function checkInSelected(){checkInResident(residentSelect.value)}
+function medSelected(){medResident(residentSelect.value)}
+function guideSelected(){const p=pointSelect.value;if(!p||p.startsWith("No "))return notice("Nova has not sent map points yet.");cmd("visitor_guide",{destination:p})}
 function staffAlert(){cmd("staff_alert",{priority:"urgent",message:"Staff assistance requested."})}
-function sendMessage(){const p=selectedPoint(); if(!p)return notice("Nova has not sent map points yet."); cmd("message",{destination:p,message:messageText.value||"Please meet Nova at this location."})}
-async function addResident(){const resident={full_name:manualName.value,room:manualRoom.value,wing:manualWing.value,care_level:manualCare.value,primary_contact_phone:manualPhone.value,medication_notes:manualNotes.value};const out=await post("/api/residents",resident);notice(out.ok?"Resident registered":out.error||"Could not add resident");refresh()}
-async function createAlert(){const out=await post("/api/alerts",{priority:"urgent",room:alertRoom.value,message:alertMessage.value||"Staff assistance requested."});notice(out.ok?"Alert created":out.error||"Could not create alert");refresh()}
+function sendMessage(){const p=pointSelect.value;if(!p||p.startsWith("No "))return notice("Nova has not sent map points yet.");cmd("message",{destination:p,message:messageText.value||"Please meet Nova at this location."})}
+let _editId=null;
+function editResident(id){const r=residentById(id);if(!r)return notice("Resident not found.");_editId=id;manualName.value=r.name||"";manualRoom.value=r.room||"";manualMapPoint.value=r.mapPoint||r.room||"";manualWing.value=r.wing||"";manualCare.value=r.careLevel||"";manualPhone.value=r.contactPhone||"";manualNotes.value=[r.medicationNotes,r.mobilityNotes,r.emergencyNotes].filter(Boolean).join("; ");manualPrompt.value=r.checkInSchedule||"";saveResBtn.textContent="Save Changes";cancelEditBtn.style.display="inline-block";resFormTitle.textContent="Edit Resident";sv("residents",document.querySelector('.nav a[onclick*=\\'residents\\']'));manualName.focus()}
+function cancelEdit(){_editId=null;[manualName,manualRoom,manualMapPoint,manualWing,manualCare,manualPhone,manualNotes,manualPrompt].forEach(f=>f.value="");saveResBtn.textContent="Add Resident";cancelEditBtn.style.display="none";resFormTitle.textContent="Add Resident"}
+async function saveResident(){const b={full_name:manualName.value,room:manualRoom.value,map_point:manualMapPoint.value||manualRoom.value,wing:manualWing.value,care_level:manualCare.value,primary_contact_phone:manualPhone.value,medication_notes:manualNotes.value,check_in_schedule:manualPrompt.value};if(_editId)b.resident_id=_editId;const out=await post("/api/residents",b);notice(out.ok?(_editId?"Resident updated":"Resident added"):(out.error||"Could not save resident"));if(out.ok)cancelEdit();refresh()}
+async function deleteResident(id){if(!confirm("Remove this resident from the registry?"))return;const r=await fetch("/api/residents/"+encodeURIComponent(id),{method:"DELETE"});const out=await r.json();notice(out.ok?"Resident removed":(out.error||"Could not remove"));refresh()}
+async function createAlert(priority){const out=await post("/api/alerts",{priority:priority||"urgent",room:alertRoom.value,message:alertMessage.value||"Staff assistance requested."});notice(out.ok?"Alert created":(out.error||"Could not create alert"));if(out.ok){alertRoom.value="";alertMessage.value=""}refresh()}
+async function dismissAlert(id){const out=await post("/api/alerts/"+encodeURIComponent(id)+"/dismiss",{});notice(out.ok?"Alert dismissed":(out.error||"Could not dismiss"));refresh()}
 async function uploadResidents(){const file=residentFile.files[0];if(!file)return notice("Choose the completed CSV first.");const text=await file.text();const r=await fetch("/api/residents/import",{method:"POST",headers:{"content-type":"text/csv"},body:text});const out=await r.json();notice(out.ok?("Imported "+out.count+" residents"):(out.error||"Import failed"));residentFile.value="";refresh()}
-async function uploadLogo(){const file=logoFile.files[0];if(!file)return notice("Choose the exact ZOX logo image first.");if(file.size>5*1024*1024)return notice("Logo is too large. Use a PNG/JPEG under 5 MB.");const reader=new FileReader();reader.onload=async()=>{const out=await post("/api/logo",{dataUrl:reader.result});notice(out.ok?"Logo updated":(out.error||"Logo update failed"));if(out.logo){logoPreview.src=out.logo;sideLogo.innerHTML='<img src="'+out.logo+'" alt="ZOX Robotics">'}logoFile.value=""};reader.onerror=()=>notice("Could not read that image file.");reader.readAsDataURL(file)}
-async function addUser(){const out=await post("/api/users",{username:newUser.value,password:newPass.value,role:newRole.value});notice(out.ok?"User added":out.error||"Could not add user");newUser.value="";newPass.value="";loadUsers()}
-async function loadUsers(){const out=await get("/api/users");userList.innerHTML=out.users?out.users.map(u=>row(u.role==="admin"?"blue":"green",u.username,u.role+" · created "+new Date(u.createdAt).toLocaleDateString())).join(""):empty(out.error||"User list unavailable")}
-function renderMap(target,points){if(!points.length){target.className="map empty";target.innerHTML="No real Nova map points received yet.";return}target.className="map";target.innerHTML=points.slice(0,10).map((p,i)=>'<button class="pin '+(i%2?"green":"blue")+'" title="'+esc(p.name)+'" style="left:'+(8+(i*17)%78)+'%;top:'+(16+(i*23)%62)+'%" onclick="cmd(\\'visitor_guide\\',{destination:\\''+esc(p.name)+'\\'})">'+(i+1)+'</button>').join("")}
-function renderAll(s){const care=s.care||{};const residents=care.residents||[];const reminders=care.reminders||[];const alerts=care.alerts||[];const pts=s.points||[];const people=s.people||[];window.state=s;statRobot.textContent=s.online?"1":"0";statResidents.textContent=residents.length;statPoints.textContent=pts.length;statPeople.textContent=people.length;statCamera.textContent=s.camera?"On":"Off";sideOnline.textContent=(s.online?"1":"0")+"/1";sideHealth.textContent=s.online?"Robot connected: "+new Date(s.lastSeen).toLocaleTimeString():"Waiting for real robot feed";onlinePill.textContent=s.online?"Online":"Offline";onlinePill.className="pill "+(s.online?"ok":"bad");alertCount.textContent=alerts.length+" alerts";
-robotBox.innerHTML=row(s.online?"blue":"red","Nova 01",(s.status?.destination||"No destination")+" - "+(s.status?.battery||"Battery unknown"),'<span class="pill '+(s.online?"ok":"bad")+'">'+(s.online?"Online":"Offline")+"</span>")+'<p class="muted">'+esc(s.status?.status||"No status from Nova yet.")+"</p>";
-residentBox.innerHTML=residents.length?residents.slice(0,5).map(r=>row("purple",r.name,r.room,'<button class="cmd" onclick="checkInResident(\\''+esc(r.id)+'\\')">Go</button>')).join(""):empty("No residents registered. Use Residents > Download Excel Template.");
-alertBox.innerHTML=alerts.length?alerts.slice(0,5).map(a=>row(a.priority==="urgent"?"red":"yellow",a.message||"Alert",a.room||a.residentId||"Facility",'<span class="pill '+(a.priority==="urgent"?"bad":"warn")+'">'+esc(a.priority||"open")+"</span>")).join(""):empty("No active alerts.");
-peopleBox.innerHTML=people.length?people.map(p=>row("cyan","Target "+(p.id??"?"),"x="+(p.x??"-")+" y="+(p.y??"-")+" distance="+(p.distance??"-"))).join(""):empty("No people detected in the real Nova feed.");
+async function uploadLogo(){const file=logoFile.files[0];if(!file)return notice("Choose the ZOX logo image first.");if(file.size>5*1024*1024)return notice("Logo too large. Use PNG/JPEG under 5 MB.");const reader=new FileReader();reader.onload=async()=>{const out=await post("/api/logo",{dataUrl:reader.result});notice(out.ok?"Logo updated":(out.error||"Logo update failed"));if(out.logo){logoPreview.src=out.logo;sideLogo.innerHTML='<img src="'+out.logo+'" alt="ZOX Robotics">'}logoFile.value=""};reader.onerror=()=>notice("Could not read image file.");reader.readAsDataURL(file)}
+async function addUser(){const out=await post("/api/users",{username:newUser.value,password:newPass.value,role:newRole.value});notice(out.ok?"User added":(out.error||"Could not add user"));newUser.value="";newPass.value="";loadUsers()}
+async function loadUsers(){const out=await get("/api/users");userList.innerHTML=out.users?out.users.map(u=>rr(u.role==="admin"?"blue":"green",u.username,u.role+" &middot; "+new Date(u.createdAt).toLocaleDateString())).join(""):es(out.error||"User list unavailable")}
+function renderMap(target,points){if(!points.length){target.className="map es";target.innerHTML="No map points from Nova yet.";return}target.className="map";target.innerHTML=points.slice(0,10).map((p,i)=>'<button class="pin '+(i%2?"green":"blue")+'" title="'+esc(p.name)+'" style="left:'+(8+(i*17)%78)+'%;top:'+(16+(i*23)%62)+'%" onclick="cmd(\\'visitor_guide\\',{destination:\\''+esc(p.name)+'\\'})">'+(i+1)+'</button>').join("")}
+function alertCard(a){const u=a.priority!=="standard";return '<div class="ac'+(u?"":" std")+'"><div class="adot'+(u?"":" std")+'">'+(u?"!":"▲")+'</div><div class="ab"><b>'+esc(a.message||"Alert")+'</b><span>'+esc(a.room||a.residentId||"Facility")+" &middot; "+new Date(a.createdAt||Date.now()).toLocaleTimeString()+'</span></div><div class="aa"><button class="cmd sm danger" onclick="dismissAlert(\\''+esc(a.id)+'\\')">Dismiss</button></div></div>'}
+function renderAll(s){const c=s.care||{};const res=c.residents||[];const rem=c.reminders||[];const al=c.alerts||[];const pts=s.points||[];const ppl=s.people||[];window._s=s;
+statRobot.textContent=s.online?"1":"0";statResidents.textContent=res.length;statPoints.textContent=pts.length;statPeople.textContent=ppl.length;statCamera.textContent=s.camera?"On":"Off";
+sideOnline.textContent=(s.online?"1":"0")+"/1";sideHealth.textContent=s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString():"Waiting for robot";
+onlinePill.textContent=s.online?"Online":"Offline";onlinePill.className="pill "+(s.online?"ok":"bad");
+alertCount.textContent=al.length+" alert"+(al.length===1?"":"s");alertCount.className="pill "+(al.length?"bad":"ok");
+robotBox.innerHTML=rr(s.online?"blue":"red","Nova 01",(s.status?.destination||"No destination")+" &mdash; "+(s.status?.battery||"Battery unknown"),'<span class="pill '+(s.online?"ok":"bad")+'">'+(s.online?"Online":"Offline")+"</span>")+'<p class="muted" style="margin:8px 0 0;font-size:12px">'+esc(s.status?.status||"No status from Nova yet.")+"</p>";
+residentBox.innerHTML=res.length?res.slice(0,4).map(r=>rr("purple",r.name,r.room,'<button class="cmd sm" onclick="checkInResident(\\''+esc(r.id)+'\\')">Go</button>')).join("")+(res.length>4?'<p class="muted" style="margin:8px 0 0;font-size:12px">+'+(res.length-4)+" more</p>":""):es("No residents registered.");
+alertBox.innerHTML=al.length?al.slice(0,4).map(a=>rr(a.priority!=="standard"?"red":"yellow",a.message||"Alert",a.room||"Facility",'<button class="cmd sm danger" onclick="dismissAlert(\\''+esc(a.id)+'\\')">&#215;</button>')).join("")+(al.length>4?'<p class="muted" style="margin:8px 0 0;font-size:12px">+'+(al.length-4)+" more</p>":""):es("No active alerts.");
+peopleBox.innerHTML=ppl.length?ppl.map(p=>rr("cyan","Target "+(p.id??"?"),"x="+(p.x??"-")+" y="+(p.y??"-")+" d="+(p.distance??"-"))).join(""):es("No people detected by Nova.");
 renderMap(mapBox,pts);renderMap(fullMapBox,pts);
-robotsFleet.innerHTML=robotBox.innerHTML;robotDiagnostics.innerHTML=row(s.status?.robotSdk?"green":"yellow","RobotAPI / AgentOS",s.status?.robotSdk?"Connected":"No SDK connected flag received")+row("blue","Real Map Points",String(pts.length))+row("cyan","People Detected",String(people.length))+row(s.camera?"green":"red","Camera Feed",s.camera?"Frame available":"No frame");rawDetection.textContent=JSON.stringify({detection:s.detection||{},people},null,2);
-roundResidents.innerHTML=residents.length?residents.map(r=>row("blue",r.name,r.room,'<button class="cmd" onclick="checkInResident(\\''+esc(r.id)+'\\')">Check</button>')).join(""):empty("Register residents before starting care rounds.");roundSchedule.innerHTML=reminders.length?reminders.map(r=>row("green",r.timeLabel||"Scheduled",r.title||"Reminder")).join(""):empty("No reminders from Nova or cloud yet.");
-residentDirectory.innerHTML=residents.length?residents.map(r=>row("purple",r.name,r.room+" "+(r.wing||""),'<span class="pill low">'+esc(r.careLevel||"care")+"</span>")).join(""):empty("No residents registered.");residentSelect.innerHTML=residents.map(r=>'<option value="'+esc(r.id)+'">'+esc(r.name)+" - "+esc(r.room)+"</option>").join("");
-alertCenter.innerHTML=alertBox.innerHTML;pointSelect.innerHTML=pts.map(p=>"<option>"+esc(p.name)+"</option>").join("");if(!pts.length)pointSelect.innerHTML="";
-const logRows=[...(care.logs||[]),...(s.events||[]).slice().reverse().map(e=>({createdAt:e.at,title:e.type,detail:JSON.stringify(e.data||{})}))];opsLog.innerHTML=(logRows.length?logRows:[{title:"Ready",detail:"Waiting for robot and facility activity"}]).slice(0,50).map(l=>"<tr><td>"+new Date(l.createdAt||Date.now()).toLocaleTimeString()+"</td><td>"+esc(l.title||"Event")+"</td><td>"+esc(l.detail||l.mapPoint||"")+'</td><td><span class="pill ok">OK</span></td></tr>').join("");
-settingsRelay.innerHTML=row(s.online?"green":"red","Robot Cloud",s.online?"Online":"Offline")+row(s.camera?"green":"red","Camera",s.camera?"Real frame ready":"No real frame")+row("blue","Resident Registry",residents.length+" registered");
-formatRows.innerHTML=columns.map(c=>"<tr><td><b>"+c+"</b></td><td>"+({resident_id:"Optional stable ID. Leave blank to auto-generate.",full_name:"Required.",room:"Required.",map_point:"Nova map point to navigate to. Use the exact point name from Nova when possible.",wing:"Optional location group.",care_level:"Independent / Assisted / High.",primary_contact_name:"Optional.",primary_contact_phone:"Optional.",medication_notes:"Optional care note.",mobility_notes:"Optional mobility/safety note.",preferred_language:"Optional.",check_in_schedule:"Example: daily 09:00.",emergency_notes:"Optional urgent note."}[c]||"")+"</td></tr>").join("");
-if(s.camera){cameraBox.style.display="block";noCamera.style.display="none";camera.src="/api/camera.jpg?t="+Date.now();cameraNote.textContent="Real Nova snapshot feed."}else{cameraBox.style.display="none";noCamera.style.display="grid"}
+robotsFleet.innerHTML=robotBox.innerHTML;
+robotDiagnostics.innerHTML=rr(s.status?.robotSdk?"green":"yellow","RobotAPI","AgentOS: "+(s.status?.robotSdk?"connected":"not detected"))+rr("blue","Map Points",pts.length+" known")+rr("cyan","People",ppl.length+" detected")+rr(s.camera?"green":"red","Camera",s.camera?"Frame available":"No frame");
+rawDetection.textContent=JSON.stringify({detection:s.detection||{},people:ppl},null,2);
+roundResidents.innerHTML=res.length?res.map(r=>rr("blue",r.name,r.room,'<button class="cmd sm" onclick="checkInResident(\\''+esc(r.id)+'\\')">Check In</button><button class="cmd sm" onclick="medResident(\\''+esc(r.id)+'\\')">Med</button>')).join(""):es("Register residents to use care rounds.");
+roundSchedule.innerHTML=rem.length?rem.map(r=>rr("green",r.timeLabel||"Scheduled",r.title||"Reminder")).join(""):es("No reminders scheduled.");
+residentDirectory.innerHTML=res.length?res.map(r=>rr("purple",r.name,r.room+(r.wing?" &middot; "+r.wing:"")+(r.careLevel?" &mdash; "+r.careLevel:""),'<button class="cmd sm" onclick="editResident(\\''+esc(r.id)+'\\')">Edit</button><button class="cmd sm danger" onclick="deleteResident(\\''+esc(r.id)+'\\')">Del</button>')).join(""):es("No residents. Add one using the form.");
+residentSelect.innerHTML=res.length?res.map(r=>'<option value="'+esc(r.id)+'">'+esc(r.name)+" &mdash; "+esc(r.room)+"</option>").join(""):"<option disabled>No residents registered</option>";
+alertCenter.innerHTML=al.length?al.map(alertCard).join(""):es("No active alerts.");
+pointSelect.innerHTML=pts.length?pts.map(p=>"<option>"+esc(p.name)+"</option>"):"<option disabled>No points from Nova yet</option>";
+const logRows=[...(c.logs||[]),...(s.events||[]).slice().reverse().map(e=>({createdAt:e.at,title:e.type,detail:JSON.stringify(e.data||{})}))];
+opsLog.innerHTML=(logRows.length?logRows:[{title:"Ready",detail:"Waiting for robot and facility activity"}]).slice(0,80).map(l=>"<tr><td class='small'>"+new Date(l.createdAt||Date.now()).toLocaleTimeString()+"</td><td>"+esc(l.title||"Event")+"</td><td class='small muted'>"+esc(String(l.detail||l.mapPoint||"").slice(0,120))+"</td><td><span class='pill ok'>ok</span></td></tr>").join("");
+settingsRelay.innerHTML=rr(s.online?"green":"red","Robot Cloud",s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString():"Offline")+rr(s.camera?"green":"red","Camera",s.camera?"Frame ready":"No frame")+rr("blue","Residents",res.length+" in registry");
+const fmtHelp={resident_id:"Optional. Leave blank to auto-generate.",full_name:"Required.",room:"Required.",map_point:"Nova map point name (exact). Falls back to room.",wing:"Optional location group.",care_level:"e.g. Independent / Assisted / High.",primary_contact_name:"Optional.",primary_contact_phone:"Optional.",medication_notes:"Care note.",mobility_notes:"Mobility/safety note.",preferred_language:"Optional.",check_in_schedule:"e.g. daily 09:00.",emergency_notes:"Optional urgent note."};
+formatRows.innerHTML=columns.map(c=>"<tr><td><b>"+c+"</b></td><td class='muted'>"+esc(fmtHelp[c]||"")+"</td></tr>").join("");
+if(s.camera){cameraBox.style.display="block";noCamera.style.display="none";camera.src="/api/camera.jpg?t="+Date.now();cameraNote.textContent="Live snapshot from Nova."}else{cameraBox.style.display="none";noCamera.style.display="grid"}
 }
 async function refresh(){renderAll(await get("/api/state"))}
 setInterval(refresh,2000);refresh();loadUsers();
@@ -451,6 +649,11 @@ const server = http.createServer(async (req, res) => {
     if (idx >= 0) facility.residents[idx] = resident;
     else facility.residents.push(resident);
     facility.logs.push({ createdAt: Date.now(), title: "Resident registered", detail: `${resident.name} - ${resident.room}` });
+    commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "upsert_resident", params: {
+      id: resident.id, name: resident.name, room: resident.room, mapPoint: resident.mapPoint || resident.room,
+      notes: [resident.medicationNotes, resident.mobilityNotes].filter(Boolean).join("; "),
+      checkInPrompt: resident.checkInSchedule || `Hello ${resident.name}. I am checking in. Do you need anything?`
+    }});
     log("resident", { id: resident.id, name: resident.name });
     return sendJson(res, 200, { ok: true, resident });
   }
@@ -494,6 +697,28 @@ const server = http.createServer(async (req, res) => {
     facility.logs.push({ createdAt: Date.now(), title: "Command queued", detail: `${command.action} ${JSON.stringify(command.params)}` });
     log("command", command);
     return sendJson(res, 200, { ok: true, command });
+  }
+  const residentDeleteMatch = url.pathname.match(/^\/api\/residents\/([^/]+)$/);
+  if (residentDeleteMatch && req.method === "DELETE") {
+    if (!requireRole(req, res, "operator")) return;
+    const id = decodeURIComponent(residentDeleteMatch[1]);
+    const idx = facility.residents.findIndex((r) => r.id === id);
+    if (idx < 0) return sendJson(res, 404, { ok: false, error: "resident not found" });
+    const removed = facility.residents.splice(idx, 1)[0];
+    facility.logs.push({ createdAt: Date.now(), title: "Resident removed", detail: `${removed.name} — ${removed.room}` });
+    commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "delete_resident", params: { id: removed.id } });
+    log("resident_deleted", { id: removed.id, name: removed.name });
+    return sendJson(res, 200, { ok: true });
+  }
+  const alertDismissMatch = url.pathname.match(/^\/api\/alerts\/([^/]+)\/dismiss$/);
+  if (alertDismissMatch && req.method === "POST") {
+    if (!requireRole(req, res, "operator")) return;
+    const alertId = decodeURIComponent(alertDismissMatch[1]);
+    const idx = facility.alerts.findIndex((a) => a.id === alertId);
+    if (idx >= 0) facility.alerts.splice(idx, 1);
+    facility.logs.push({ createdAt: Date.now(), title: "Alert dismissed", detail: alertId });
+    log("alert_dismissed", { id: alertId });
+    return sendJson(res, 200, { ok: true });
   }
   sendJson(res, 404, { ok: false, error: "not found" });
 });
