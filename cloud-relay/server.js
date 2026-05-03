@@ -707,6 +707,10 @@ function renderAll(s){
 }
 async function refresh(){const s=await get("/api/state");if(s&&Object.keys(s).length)renderAll(s)}
 setInterval(refresh,2000);refresh();loadUsers();
+document.querySelectorAll('.nav a[data-view]').forEach(function(a){
+  a.addEventListener('click',function(e){e.preventDefault();sv(this.getAttribute('data-view'),this);});
+});
+window.onerror=function(msg,src,line){notice('JS Error: '+msg+' (line '+line+')',false);return false;};
 </script></body></html>`;
 }
 
