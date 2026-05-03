@@ -2,6 +2,7 @@ const http = require("http");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const { MongoClient } = require("mongodb");
 
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_USER = process.env.ADMIN_USER || "admin";
@@ -34,28 +35,62 @@ function verifyPassword(password, stored) {
 users.set(ADMIN_USER, { username: ADMIN_USER, role: "admin", passwordHash: passwordHash(ADMIN_PASS), createdAt: Date.now() });
 
 const DATA_FILE = path.join(__dirname, "nova_data.json");
-(function loadPersistedData() {
+const MONGODB_URI = process.env.MONGODB_URI || "";
+let mongoDb = null;
+
+async function connectMongo() {
+  if (!MONGODB_URI) { console.log("[storage] no MONGODB_URI set — using file storage"); return; }
   try {
-    const raw = fs.readFileSync(DATA_FILE, "utf8");
-    const saved = JSON.parse(raw);
-    if (Array.isArray(saved.residents)) facility.residents = saved.residents;
-    if (Array.isArray(saved.reminders)) facility.reminders = saved.reminders;
-    if (Array.isArray(saved.alerts)) facility.alerts = saved.alerts;
-    if (Array.isArray(saved.scheduledRounds)) saved.scheduledRounds.forEach(function(s) { scheduledRounds.push(s); });
-    if (Array.isArray(saved.roundHistory)) saved.roundHistory.forEach(function(h) { roundHistory.push(h); });
-    if (Array.isArray(saved.roundOrder)) facility.roundOrder = saved.roundOrder;
-    if (saved.checkIns && typeof saved.checkIns === "object") facility.checkIns = saved.checkIns;
-    if (typeof saved.brandLogoDataUrl === "string" && saved.brandLogoDataUrl) brandLogoDataUrl = saved.brandLogoDataUrl;
-    console.log("[persist] loaded:", facility.residents.length, "residents,", scheduledRounds.length, "schedules");
-  } catch(e) { if (e.code !== "ENOENT") console.error("[persist] load error:", e.message); }
-})();
+    const client = new MongoClient(MONGODB_URI, { serverSelectionTimeoutMS: 6000 });
+    await client.connect();
+    mongoDb = client.db("nova_care");
+    console.log("[storage] MongoDB connected");
+  } catch(e) {
+    console.error("[storage] MongoDB connect failed:", e.message, "— falling back to file");
+  }
+}
+
+function applySnap(saved) {
+  if (Array.isArray(saved.residents)) facility.residents = saved.residents;
+  if (Array.isArray(saved.reminders)) facility.reminders = saved.reminders;
+  if (Array.isArray(saved.alerts)) facility.alerts = saved.alerts;
+  if (Array.isArray(saved.scheduledRounds)) saved.scheduledRounds.forEach(s => scheduledRounds.push(s));
+  if (Array.isArray(saved.roundHistory)) saved.roundHistory.forEach(h => roundHistory.push(h));
+  if (Array.isArray(saved.roundOrder)) facility.roundOrder = saved.roundOrder;
+  if (saved.checkIns && typeof saved.checkIns === "object") facility.checkIns = saved.checkIns;
+  if (typeof saved.brandLogoDataUrl === "string" && saved.brandLogoDataUrl) brandLogoDataUrl = saved.brandLogoDataUrl;
+}
+
+async function loadPersistedData() {
+  if (mongoDb) {
+    try {
+      const doc = await mongoDb.collection("facility").findOne({ _id: "state" });
+      if (doc) {
+        applySnap(doc);
+        console.log("[storage] loaded from MongoDB:", facility.residents.length, "residents,", scheduledRounds.length, "schedules");
+        return;
+      }
+    } catch(e) { console.error("[storage] MongoDB load error:", e.message); }
+  }
+  try {
+    applySnap(JSON.parse(fs.readFileSync(DATA_FILE, "utf8")));
+    console.log("[storage] loaded from file:", facility.residents.length, "residents,", scheduledRounds.length, "schedules");
+  } catch(e) { if (e.code !== "ENOENT") console.error("[storage] file load error:", e.message); }
+}
+
 let _saveTimer = null;
 let lastSaved = 0;
 function persistData() {
   if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(function() {
-    const snap = JSON.stringify({ residents: facility.residents, reminders: facility.reminders, alerts: facility.alerts, scheduledRounds: scheduledRounds, roundHistory: roundHistory, roundOrder: facility.roundOrder, checkIns: facility.checkIns, brandLogoDataUrl: brandLogoDataUrl });
-    fs.writeFile(DATA_FILE, snap, function(err) { if (err) console.error("[persist] save error:", err.message); else lastSaved = Date.now(); });
+  _saveTimer = setTimeout(async () => {
+    const snap = { residents: facility.residents, reminders: facility.reminders, alerts: facility.alerts, scheduledRounds, roundHistory, roundOrder: facility.roundOrder, checkIns: facility.checkIns, brandLogoDataUrl };
+    if (mongoDb) {
+      try {
+        await mongoDb.collection("facility").updateOne({ _id: "state" }, { $set: snap }, { upsert: true });
+        lastSaved = Date.now(); return;
+      } catch(e) { console.error("[storage] MongoDB save error:", e.message); }
+    }
+    fs.writeFile(DATA_FILE, JSON.stringify(snap), err => { if (err) console.error("[storage] file save error:", err.message); else lastSaved = Date.now(); });
   }, 500);
 }
 
@@ -572,31 +607,37 @@ select.field{cursor:pointer}
 <section class="view" id="view-settings">
 <div class="g2">
 <div class="card">
-<div class="ch">Cloud Relay Status</div>
+<div class="ch">System Status</div>
 <div id="settingsRelay"></div>
-<div style="margin-top:14px;display:flex;flex-wrap:wrap;gap:6px"><button class="btn p s" onclick="cmd(&#39;camera_start&#39;)">Test Camera</button><button class="btn s" onclick="cmd(&#39;security_start&#39;)">Test Detection</button><a class="btn s" href="/api/export" download>&#8681; Export Backup</a></div>
-<div style="margin-top:20px;padding-top:16px;border-top:1px solid #eef2f8">
-<div class="ch" style="margin-bottom:10px">Brand Logo</div>
-<img class="lp" id="logoPreview" src="${brandLogoDataUrl || ""}" alt="Logo">
-<input class="field" id="logoFile" type="file" accept="image/png,image/jpeg,image/webp" style="margin-top:8px">
-<button class="btn p s" onclick="uploadLogo()" style="margin-top:6px">Upload Logo</button>
-<p style="font-size:12px;color:#8898b0;margin:6px 0 0">PNG or JPG, max 5 MB.</p>
+<div style="margin-top:16px;padding-top:14px;border-top:1px solid #eef2f8">
+<div class="ch" style="margin-bottom:10px">Actions</div>
+<div style="display:flex;flex-wrap:wrap;gap:8px">
+<button class="btn p s" onclick="cmd(&#39;camera_start&#39;)">&#9654;&nbsp;Test Camera</button>
+<button class="btn s" onclick="cmd(&#39;security_start&#39;)">&#9673;&nbsp;Detection Mode</button>
+<a class="btn s" href="/api/export" download>&#8681;&nbsp;Export Backup</a>
+</div>
+<p style="font-size:12px;color:#8898b0;margin:10px 0 0">Export downloads a full JSON backup of all facility data — residents, schedules, rounds, and alerts. Run before a redeploy if you are using file storage.</p>
 </div>
 </div>
 <div class="card">
-<div class="ch">User Access</div>
+<div class="ch">Brand &amp; Identity</div>
+<div style="display:flex;align-items:flex-start;gap:14px;padding-bottom:16px;border-bottom:1px solid #eef2f8;margin-bottom:16px">
+<img class="lp" id="logoPreview" src="${brandLogoDataUrl || ""}" alt="Logo" style="width:72px;height:72px;flex-shrink:0;margin:0">
+<div style="flex:1">
+<label class="fl" style="margin-top:0">Logo Image</label>
+<input class="field" id="logoFile" type="file" accept="image/png,image/jpeg,image/webp">
+<button class="btn p s" onclick="uploadLogo()" style="margin-top:6px">Upload Logo</button>
+<p style="font-size:12px;color:#8898b0;margin:6px 0 0">PNG or JPG, max 5 MB. Shown in sidebar and sign-in page.</p>
+</div>
+</div>
+<div class="ch" style="margin-bottom:10px">User Access</div>
 <div class="fbox">
-<label class="fl">Username</label><input class="field" id="newUser" placeholder="Username (3–40 chars)">
+<label class="fl" style="margin-top:0">Username</label><input class="field" id="newUser" placeholder="Username (3–40 chars)">
 <label class="fl">Password</label><input class="field" id="newPass" type="password" placeholder="Minimum 8 characters">
 <label class="fl">Role</label><select class="field" id="newRole"><option value="operator">Operator</option><option value="viewer">Viewer</option><option value="admin">Admin</option></select>
-<button class="btn p s" style="margin-top:8px" onclick="addUser()">Add User</button>
+<button class="btn p s" style="margin-top:8px" onclick="addUser()">&#43;&nbsp;Add User</button>
 </div>
 <div id="userList"></div>
-<div style="margin-top:18px;padding-top:16px;border-top:1px solid #eef2f8">
-<div class="ch" style="margin-bottom:10px">CSV Import Format</div>
-<table class="tbl" style="font-size:12px"><tbody id="formatRows"></tbody></table>
-<a class="btn s" href="/templates/residents.csv" style="margin-top:10px;display:inline-flex">Download Template</a>
-</div>
 </div>
 </div>
 </section>
@@ -605,7 +646,7 @@ select.field{cursor:pointer}
 <div class="toast" id="toast"></div>
 <script>
 var columns=${JSON.stringify(residentColumns)};
-var T={command:["Command Center","Live data from Nova and your facility registry."],robots:["Robot Feeds","Telemetry and detection feed from Nova."],rounds:["Care Rounds","Build rounds, set schedules, and track check-ins."],residents:["Residents","Manage the resident registry."],alerts:["Alerts","Create urgent alerts and monitor facility events."],map:["Map & Messaging","Live map points from Nova."],logs:["Operations Log","Commands, state updates and facility actions."],settings:["Settings","Relay status, users, logo and CSV format."]};
+var T={command:["Command Center","Live data from Nova and your facility registry."],robots:["Robot Feeds","Telemetry and detection feed from Nova."],rounds:["Care Rounds","Build rounds, set schedules, and track check-ins."],residents:["Residents","Manage the resident registry."],alerts:["Alerts","Create urgent alerts and monitor facility events."],map:["Map & Messaging","Live map points from Nova."],logs:["Operations Log","Commands, state updates and facility actions."],settings:["Settings","System status, brand, users and backup tools."]};
 function get(p){return fetch(p,{cache:"no-store"}).then(function(r){return r.ok?r.json():{};}).catch(function(){return{};})}
 function post(p,b){return fetch(p,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b)}).then(function(r){return r.json();}).catch(function(){return{ok:false,error:"Network error"};})}
 function cmd(action,params){params=params||{};notice("Sending...",true);post("/api/command",{action:action,params:params}).then(function(out){notice(out.ok?"Sent: "+action:"Error: "+(out.error||"failed"),out.ok);refresh();});}
@@ -1038,9 +1079,7 @@ function renderAll(s){
   var LTITLE={"command":"Command sent","result":"Result received","resident":"Resident saved","resident_import":"CSV import","resident_deleted":"Resident removed","alert":"Alert created","alert_dismissed":"Alert dismissed","login":"Staff signed in","login_failed":"Sign-in failed","scheduled_round":"Scheduled round fired","queue_cleared":"Queue cleared","logo_updated":"Logo updated","user_created":"User created","schedule_created":"Schedule created","upsert_resident":"Resident synced to Nova","delete_resident":"Resident removed from Nova"};
   var LMETA={"command":{ic:"&#9654;",cl:"blue"},"result":{ic:"&#10003;",cl:"green"},"resident":{ic:"&#9673;",cl:"purple"},"resident_import":{ic:"&#9673;",cl:"purple"},"resident_deleted":{ic:"&#9673;",cl:"red"},"alert":{ic:"!",cl:"red"},"alert_dismissed":{ic:"&#10003;",cl:"green"},"login":{ic:"&#9679;",cl:"cyan"},"login_failed":{ic:"&#10005;",cl:"red"},"scheduled_round":{ic:"&#8635;",cl:"green"},"queue_cleared":{ic:"&#9747;",cl:"yellow"},"logo_updated":{ic:"&#9998;",cl:"cyan"},"user_created":{ic:"&#9873;",cl:"blue"},"schedule_created":{ic:"&#8635;",cl:"blue"},"upsert_resident":{ic:"&#9673;",cl:"blue"},"delete_resident":{ic:"&#9673;",cl:"red"}};
   ht("opsLog",logRows.length?logRows.slice(0,120).map(function(l){var m=LMETA[l.title]||{ic:"&#9679;",cl:"blue"};var dt=new Date(l.createdAt||Date.now());var diff=Date.now()-(l.createdAt||0);var ts=diff<3600000?timeAgo(l.createdAt):(diff<86400000?dt.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):dt.toLocaleDateString([],{month:"short",day:"numeric"})+" "+dt.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}));return'<div class="row"><div class="dot c-'+m.cl+'" style="font-size:12px;width:32px;height:32px;border-radius:8px">'+m.ic+'</div><div class="rb"><b>'+(LTITLE[l.title]||esc(l.title||"Event"))+'</b><span>'+esc(String(l.detail||"").slice(0,100))+'</span></div><div class="ra" style="font-size:11px;color:#a0b0c8;white-space:nowrap">'+ts+'</div></div>';}).join(""):esb("No activity logged yet. Connect Nova and start managing your facility."));
-  var fh={resident_id:"Optional — auto-generated if blank.",full_name:"Required.",room:"Required.",map_point:"Exact Nova map point name.",wing:"Optional.",care_level:"Independent / Assisted / High.",primary_contact_name:"Optional.",primary_contact_phone:"Optional.",medication_notes:"Medication schedule.",mobility_notes:"Mobility aids and restrictions.",preferred_language:"Communication preference.",check_in_schedule:"e.g. daily 09:00",emergency_notes:"Critical staff notes."};
-  ht("formatRows",columns.map(function(col){return'<tr><td style="font-weight:700;font-size:12px;white-space:nowrap">'+col+'</td><td style="font-size:12px;color:#5a6a80">'+esc(fh[col]||"")+"</td></tr>";}).join(""));
-  ht("settingsRelay",rRow(s.online?"green":"red","Robot Connection",s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"Not connected")+rRow(s.camera?"green":"red","Camera Feed",s.camera?"Active":"No frame")+rRow("blue","Residents",res.length+" registered")+rRow("purple","Schedules",(s.scheduledRounds||[]).length+" configured")+rRow(s.lastSaved?"green":"yellow","Data Persistence",s.lastSaved?"Saved to disk "+timeAgo(s.lastSaved)+" &middot; Survives restart":"Not yet saved — make a change to trigger save"));
+  ht("settingsRelay",rRow(s.online?"green":"red","Robot Connection",s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"Not connected — robot offline or wrong token")+rRow(s.camera?"green":"red","Camera Feed",s.camera?"Active":"No frame received")+rRow("blue","Residents",res.length+" registered"+(res.length===0?" &middot; Add residents to begin":""))+rRow("purple","Schedules",(s.scheduledRounds||[]).length+" configured")+rRow(s.storage==="mongodb"?"green":s.lastSaved?"ok":"yellow","Data Storage",s.storage==="mongodb"?"MongoDB &middot; "+(s.lastSaved?"Saved "+timeAgo(s.lastSaved):"Waiting for first save"):s.lastSaved?"File &middot; Saved "+timeAgo(s.lastSaved)+" &middot; Will reset on redeploy":"File &middot; Not yet saved &mdash; set MONGODB_URI to persist across redeploys"));
   var cb=gi("cameraBox");var nc=gi("noCamera");
   if(s.camera){if(cb)cb.style.display="block";if(nc)nc.style.display="none";updateCamera("/api/camera.jpg?t="+Date.now());}
   else{if(cb)cb.style.display="none";if(nc)nc.style.display="grid";}
@@ -1151,7 +1190,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === "/api/state") {
     const stale = Date.now() - robot.lastSeen > 15000;
-    return sendJson(res, 200, { ...robot, online: robot.online && !stale, care: mergedCare(), camera: !!robot.cameraJpegBase64, events, scheduledRounds, roundHistory, facility: { roundOrder: facility.roundOrder, checkIns: facility.checkIns }, lastSaved });
+    return sendJson(res, 200, { ...robot, online: robot.online && !stale, care: mergedCare(), camera: !!robot.cameraJpegBase64, events, scheduledRounds, roundHistory, facility: { roundOrder: facility.roundOrder, checkIns: facility.checkIns }, lastSaved, storage: mongoDb ? "mongodb" : "file" });
   }
   if (url.pathname === "/api/camera.jpg") {
     if (!robot.cameraJpegBase64) return sendText(res, 404, "No camera snapshot");
@@ -1294,4 +1333,9 @@ const server = http.createServer(async (req, res) => {
   sendJson(res, 404, { ok: false, error: "not found" });
 });
 
-server.listen(PORT, () => console.log(`Nova cloud relay listening on ${PORT}`));
+async function startServer() {
+  await connectMongo();
+  await loadPersistedData();
+  server.listen(PORT, () => console.log(`Nova cloud relay listening on ${PORT} [storage: ${mongoDb ? "MongoDB" : "file"}]`));
+}
+startServer();

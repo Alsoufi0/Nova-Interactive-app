@@ -15,3 +15,5 @@ services:
         sync: false
       - key: SESSION_SECRET
         sync: false
+      - key: MONGODB_URI
+        sync: false
