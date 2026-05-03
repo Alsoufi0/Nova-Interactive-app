@@ -256,7 +256,7 @@ function mergedCare() {
 
 function page(user = users.get(ADMIN_USER)) {
   return `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ZOX Robotics — Care Cloud</title>
+<title>ZOX Robotics — Care Cloud v3</title>
 <style>
 *{box-sizing:border-box;-webkit-font-smoothing:antialiased}
 body{margin:0;background:#eef2f7;color:#111827;font-family:Inter,system-ui,-apple-system,sans-serif;font-size:14px}
