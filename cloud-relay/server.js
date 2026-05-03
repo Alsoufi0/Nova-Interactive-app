@@ -547,8 +547,8 @@ var T={command:["Command Center","Live data from Nova and your facility registry
 function get(p){return fetch(p,{cache:"no-store"}).then(function(r){return r.ok?r.json():{};}).catch(function(){return{};})}
 function post(p,b){return fetch(p,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b)}).then(function(r){return r.json();}).catch(function(){return{ok:false,error:"Network error"};})}
 function cmd(action,params){params=params||{};post("/api/command",{action:action,params:params}).then(function(out){notice(out.ok?"Command sent to Nova":"Error: "+(out.error||"failed"),out.ok);refresh();});}
-function esc(v){return String(v||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
-function notice(t,ok=true){const el=document.getElementById("toast");if(!el)return;el.textContent=t;el.style.background=ok?"#0d1f3c":"#7a1c1c";el.style.display="block";clearTimeout(notice._t);notice._t=setTimeout(()=>el.style.display="none",3000)}
+function esc(v){var map={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};return String(v||"").replace(/[&<>"']/g,function(c){return map[c];});}
+function notice(t,ok){if(ok===undefined)ok=true;var el=document.getElementById("toast");if(!el)return;el.textContent=t;el.style.background=ok?"#0d1f3c":"#7a1c1c";el.style.display="block";clearTimeout(notice._t);notice._t=setTimeout(function(){el.style.display="none";},3000);}
 function sv(name,el){
   var views=document.querySelectorAll(".view");
   for(var i=0;i<views.length;i++){views[i].classList.remove("active");views[i].classList.add("hidden");}
@@ -561,7 +561,7 @@ function sv(name,el){
   if(pt&&T[name])pt.innerHTML=T[name][0]||name;
   if(ps&&T[name])ps.innerHTML=T[name][1]||"";
 }
-function rRow(col,title,sub,right=""){return '<div class="row"><div class="dot c-'+col+'">'+esc(String(title||"?")[0])+'</div><div class="rb"><b>'+esc(title)+'</b><span>'+esc(sub)+'</span></div><div class="ra">'+right+'</div></div>'}
+function rRow(col,title,sub,right){if(right===undefined)right="";return '<div class="row"><div class="dot c-'+col+'">'+esc(String(title||"?")[0])+'</div><div class="rb"><b>'+esc(title)+'</b><span>'+esc(sub)+'</span></div><div class="ra">'+right+'</div></div>';}
 function esb(t){return '<div class="esbox" style="min-height:70px">'+esc(t)+'</div>'}
 function byId(id){var s=window._s;var res=(s&&s.care&&s.care.residents)||[];for(var i=0;i<res.length;i++){if(res[i].id===id)return res[i];}return null;}
 function rParams(id){var el=document.getElementById("residentSelect");var rid=id||(el&&el.value)||"";var r=byId(rid);if(r){return{residentId:r.id,residentName:r.name,room:r.room,mapPoint:r.mapPoint||r.room,notes:[r.medicationNotes,r.mobilityNotes,r.emergencyNotes].filter(Boolean).join("; "),checkInPrompt:r.checkInSchedule||""};}return{residentId:rid};}
@@ -572,9 +572,9 @@ function medSelected(){var el=document.getElementById("residentSelect");medResid
 function guideSelected(){var el=document.getElementById("pointSelect");var p=el&&el.value;if(!p||p.indexOf("No ")==0)return notice("No map points received from Nova yet.",false);cmd("visitor_guide",{destination:p});}
 function staffAlert(){cmd("staff_alert",{priority:"urgent",message:"Staff assistance requested."});}
 function sendMessage(){var el=document.getElementById("pointSelect");var p=el&&el.value;if(!p||p.indexOf("No ")==0)return notice("No map points received from Nova yet.",false);var mt=document.getElementById("messageText");cmd("message",{destination:p,message:(mt&&mt.value)||"Please meet Nova at this location."});}
-let _eid=null;
+var _eid=null;
 function editResident(id){
-  const r=byId(id);if(!r)return notice("Resident not loaded yet. Try again in a moment.",false);
+  var r=byId(id);if(!r)return notice("Resident not loaded yet. Try again in a moment.",false);
   _eid=id;
   var fields={manualName:r.name,manualRoom:r.room,manualMapPoint:r.mapPoint||r.room,manualWing:r.wing||"",manualCare:r.careLevel||"",manualPhone:r.contactPhone||"",manualNotes:[r.medicationNotes,r.mobilityNotes,r.emergencyNotes].filter(Boolean).join("; "),manualPrompt:r.checkInSchedule||""};
   Object.keys(fields).forEach(function(fid){var el=document.getElementById(fid);if(el)el.value=fields[fid];});
@@ -617,10 +617,11 @@ function createAlert(priority){
   var msgEl=document.getElementById("alertMessage");var msg=msgEl&&msgEl.value.trim();
   if(!msg)return notice("Please describe the situation.",false);
   var roomEl=document.getElementById("alertRoom");var room=(roomEl&&roomEl.value.trim())||"";
-  const out=await post("/api/alerts",{priority:priority||"urgent",room,message:msg});
-  notice(out.ok?"Alert created and sent to Nova":(out.error||"Could not create alert"),out.ok);
-  if(out.ok){var ar=document.getElementById("alertRoom");var am=document.getElementById("alertMessage");if(ar)ar.value="";if(am)am.value="";}
-  refresh();
+  post("/api/alerts",{priority:priority||"urgent",room:room,message:msg}).then(function(out){
+    notice(out.ok?"Alert created and sent to Nova":(out.error||"Could not create alert"),out.ok);
+    if(out.ok){var ar=document.getElementById("alertRoom");var am=document.getElementById("alertMessage");if(ar)ar.value="";if(am)am.value="";}
+    refresh();
+  });
 }
 function dismissAlert(id){
   post("/api/alerts/"+encodeURIComponent(id)+"/dismiss",{}).then(function(out){
@@ -670,15 +671,15 @@ function renderMap(target,points){
   if(!target)return;
   if(!points.length){target.className="map empty";target.innerHTML='<div style="font-size:13px;color:#8898b0;text-align:center">No map points from Nova yet.</div>';return}
   target.className="map";
-  const cols=["c-blue","c-green","c-purple","c-cyan","c-orange"];
-  target.innerHTML=points.slice(0,10).map((p,i)=>{
-    const l=(8+(i*19)%72)+"%";const t=(12+(i*27)%66)+"%";
+  var cols=["c-blue","c-green","c-purple","c-cyan","c-orange"];
+  target.innerHTML=points.slice(0,10).map(function(p,i){
+    var l=(8+(i*19)%72)+"%";var t=(12+(i*27)%66)+"%";
     return '<button class="pin '+cols[i%cols.length]+'" title="'+esc(p.name)+'" style="left:'+l+';top:'+t+'" onclick="cmd(\'visitor_guide\',{destination:\''+esc(p.name)+'\'})">'+esc(String(i+1))+'</button>'+
            '<div style="position:absolute;left:calc('+l+' + 32px);top:calc('+t+' + 4px);font-size:10px;font-weight:700;color:#1a3058;background:white;border-radius:4px;padding:2px 5px;pointer-events:none;white-space:nowrap;max-width:72px;overflow:hidden;text-overflow:ellipsis">'+esc(p.name)+'</div>';
   }).join("");
 }
 function aCard(a){
-  const u=a.priority!=="standard";
+  var u=a.priority!=="standard";
   return '<div class="ac'+(u?"":" std")+'"><div class="adot'+(u?"":" std")+'">'+(u?"!":"&#9650;")+'</div><div class="ab"><b>'+esc(a.message||"Alert")+'</b><span class="as">'+esc(a.room||"Facility")+" &middot; "+new Date(a.createdAt||Date.now()).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})+'</span></div><div class="aa"><button class="btn s d" onclick="dismissAlert(\''+esc(a.id)+'\')">Dismiss</button></div></div>';
 }
 function renderAll(s){
