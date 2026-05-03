@@ -151,7 +151,7 @@ function requireRole(req, res, role = "admin") {
 }
 
 function loginPage(error = "") {
-  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZOX Robotics Sign In v3</title><style>
+  return `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>ZOX Robotics — Sign In</title><style>
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 0,#0d5790,#05152b 55%,#020814);font-family:Inter,system-ui,Segoe UI,sans-serif;color:white}.card{width:min(430px,92vw);background:#ffffff10;border:1px solid #ffffff26;border-radius:24px;padding:28px;box-shadow:0 24px 70px #0008}.logo{width:96px;height:96px;border-radius:26px;margin:0 auto 16px;background:#06172e;border:2px solid #10c6e7;display:grid;place-items:center;overflow:hidden}.logo img{width:100%;height:100%;object-fit:cover}.logo span{color:#1bd6ee;font-size:30px;font-weight:950}.tag{text-align:center;color:#31d7ef;font-size:11px;letter-spacing:2.4px;font-weight:900}.field{width:100%;border:1px solid #ffffff2e;background:#ffffff14;color:white;border-radius:14px;padding:14px;margin:8px 0;font:inherit}.btn{width:100%;border:0;border-radius:14px;background:#12bee5;color:#03162d;padding:14px;font-weight:950;margin-top:12px;cursor:pointer}.err{background:#ff4d4d26;color:#ffd6d6;border:1px solid #ff8a8a55;padding:10px;border-radius:12px;margin:12px 0}.muted{color:#bed0e3;font-size:13px;text-align:center}</style></head><body><form class="card" method="post" action="/login">
 <div class="logo">${brandLogoDataUrl ? `<img src="${brandLogoDataUrl}" alt="ZOX Robotics">` : "<span>ZOX</span>"}</div><div class="tag">SMART ROBOTS. BETTER CARE.</div><h1 style="text-align:center;margin:14px 0 6px">Care Cloud Sign In</h1><p class="muted">Authorized clinic staff only.</p>${error ? `<div class="err">${cleanText(error)}</div>` : ""}
 <input class="field" name="username" placeholder="Username" autocomplete="username" autofocus><input class="field" name="password" placeholder="Password" type="password" autocomplete="current-password"><button class="btn">Sign In</button></form></body></html>`;
@@ -256,7 +256,7 @@ function mergedCare() {
 
 function page(user = users.get(ADMIN_USER)) {
   return `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ZOX Robotics — Care Cloud v3</title>
+<title>ZOX Robotics — Care Cloud</title>
 <style>
 *{box-sizing:border-box;-webkit-font-smoothing:antialiased}
 body{margin:0;background:#eef2f7;color:#111827;font-family:Inter,system-ui,-apple-system,sans-serif;font-size:14px}
@@ -345,7 +345,7 @@ select.field{cursor:pointer}
 <div class="brand-text"><b>ZOX Robotics</b><span class="tag">SMART ROBOTS. BETTER CARE.</span></div>
 </div>
 <nav class="nav">
-<a data-view="command" class="active" onclick="sv('command',this)"><span class="ni">&#9632;</span>Command Center</a>
+<a data-view="command" class="active" onclick="sv('command',this)"><span class="ni">&#9632;</span>Command Center<span id="queueBadge" style="display:none;background:#d63b3b;color:white;border-radius:999px;font-size:10px;font-weight:700;padding:1px 7px;margin-left:auto;line-height:1.6">0</span></a>
 <a data-view="robots" onclick="sv('robots',this)"><span class="ni">&#9685;</span>Robot Feeds</a>
 <div class="navdiv"></div>
 <a data-view="rounds" onclick="sv('rounds',this)"><span class="ni">&#8635;</span>Care Rounds</a>
@@ -399,6 +399,7 @@ select.field{cursor:pointer}
 <div class="card"><div class="ch">Map</div><div class="map" id="mapBox"></div></div>
 <div class="card"><div class="ch">Camera<div style="display:flex;gap:5px"><button class="btn s p" onclick="cmd('camera_start')">Open</button><button class="btn s" onclick="cmd('camera_stop')">Close</button></div></div><div class="camera" id="cameraBox"><img id="camera" alt="Nova camera"><p style="font-size:12px;color:#8898b0;margin:6px 0 0" id="cameraNote"></p></div><div id="noCamera" class="esbox" style="min-height:80px">No camera feed from Nova yet.</div></div>
 </div>
+<div class="card" style="margin-top:14px"><div class="ch">Pending Command Queue<div style="display:flex;gap:6px;align-items:center"><span id="queueCount" class="pill off">0 pending</span><button class="btn s d" onclick="clearQueue()">Clear</button></div></div><div id="queueList"></div></div>
 </section>
 
 <section class="view" id="view-robots">
@@ -418,14 +419,25 @@ select.field{cursor:pointer}
 <section class="view" id="view-rounds">
 <div class="g2">
 <div class="card">
-<div class="ch">Launch Care Round</div>
-<button class="tile" style="width:100%;min-height:80px;margin-bottom:16px;flex-direction:row;gap:14px;justify-content:flex-start;padding:16px 20px" onclick="cmd('start_rounds')">
-<div class="ti c-green" style="flex-shrink:0">&#8635;</div><div style="text-align:left"><div>Start Care Round</div><div style="font-size:12px;font-weight:500;color:#5a6a8a;margin-top:3px">Send Nova to check in with all residents</div></div>
-</button>
-<div class="ch" style="margin-top:4px">Residents</div>
-<div id="roundResidents"></div>
+<div class="ch">Build Care Round<button class="btn s" onclick="selectAllForRound()">Select All</button></div>
+<label class="fl">Round Type</label>
+<select class="field" id="roundType" style="margin-bottom:8px">
+<option value="checkin">Check-in Round</option>
+<option value="medication">Medication Round</option>
+<option value="full">Full Care (Check-in + Medication)</option>
+</select>
+<label class="fl">Residents to Include</label>
+<div id="roundResidentPicker" style="max-height:300px;overflow-y:auto;border:1px solid #e5eaf3;border-radius:10px;padding:0 12px;margin:6px 0 12px"></div>
+<button class="btn p" style="width:100%;justify-content:center" onclick="startRound()">&#8635;&nbsp; Start This Round</button>
 </div>
-<div class="card"><div class="ch">Scheduled Reminders</div><div id="roundSchedule"></div></div>
+<div class="card">
+<div class="ch">Quick Actions</div>
+<div id="roundResidents"></div>
+<div style="margin-top:18px;padding-top:16px;border-top:1px solid #eef2f8">
+<div class="ch" style="margin-bottom:10px">Reminders from Nova</div>
+<div id="roundSchedule"></div>
+</div>
+</div>
 </div>
 </section>
 
@@ -462,7 +474,7 @@ select.field{cursor:pointer}
 <div style="display:flex;flex-wrap:wrap;gap:6px">
 <button class="btn p s" onclick="checkInSelected()">Check In</button>
 <button class="btn s" onclick="medSelected()">Medication</button>
-<button class="btn d s" onclick="cmd('staff_alert',{priority:'urgent',residentId:residentSelect.value,message:'Assistance requested for resident.'})">Alert Staff</button>
+<button class="btn d s" onclick="staffAlertForResident()">Alert Staff</button>
 </div>
 </div>
 </div>
@@ -707,6 +719,7 @@ function renderAll(s){
   ht("detectionList",ppl.length?ppl.map(function(p){return'<div class="row"><div class="dot c-cyan" style="font-size:11px">&#9679;</div><div class="rb"><b>Person detected</b><span>'+(p.distance!=null?"Distance: "+p.distance+"m":"Position: x="+(p.x||"-")+", y="+(p.y||"-"))+"</span></div></div>";}).join(""):esb("No people currently in Nova's detection range."));
   ht("roundResidents",res.length?res.map(function(r){return'<div class="row"><div class="dot c-blue">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+esc(r.room)+'</span></div><div class="ra"><button class="btn s p" onclick="checkInResident(&#39;'+esc(r.id)+'&#39;)">Check In</button><button class="btn s" onclick="medResident(&#39;'+esc(r.id)+'&#39;)">Med</button></div></div>';}).join(""):esb("Register residents to use care rounds."));
   ht("roundSchedule",rem.length?rem.map(function(r){return rRow("green",r.timeLabel||"Scheduled",r.title||"Reminder");}).join(""):esb("No reminders from Nova."));
+  renderRoundPicker(res);
   ht("residentDirectory",res.length?res.map(function(r){return'<div class="row"><div class="dot c-purple">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+esc(r.room+(r.wing?" &middot; "+r.wing:"")+(r.careLevel?" &mdash; "+r.careLevel:""))+'</span></div><div class="ra"><button class="btn s" onclick="editResident(&#39;'+esc(r.id)+'&#39;)">Edit</button><button class="btn s d" onclick="deleteResident(&#39;'+esc(r.id)+'&#39;)">Remove</button></div></div>';}).join(""):esb("No residents. Add one using the form."));
   var rs=gi("residentSelect");if(rs)rs.innerHTML=res.length?res.map(function(r){return'<option value="'+esc(r.id)+'">'+esc(r.name)+" &mdash; Room "+esc(r.room)+"</option>";}).join(""):"<option disabled>No residents registered yet</option>";
   ht("alertCenter",al.length?al.map(aCard).join(""):esb("No active alerts."));
@@ -722,7 +735,46 @@ function renderAll(s){
   else{if(cb)cb.style.display="none";if(nc)nc.style.display="grid";}
 }
 function refresh(){get("/api/state").then(function(s){if(s&&Object.keys(s).length)renderAll(s);});}
-setInterval(refresh,2000);refresh();loadUsers();
+function staffAlertForResident(){var el=document.getElementById("residentSelect");cmd("staff_alert",{priority:"urgent",residentId:(el&&el.value)||"",message:"Assistance requested for resident."});}
+function renderRoundPicker(res){
+  var el=document.getElementById("roundResidentPicker");if(!el)return;
+  if(!res.length){el.innerHTML='<div class="esbox" style="min-height:50px">No residents registered. Add them in the Residents section.</div>';return;}
+  var prev={};var cbs=document.querySelectorAll(".round-res-cb");for(var i=0;i<cbs.length;i++)prev[cbs[i].value]=cbs[i].checked;
+  el.innerHTML=res.map(function(r){
+    var chk=prev[r.id]===false?"":"checked";
+    return '<label style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #f0f4fa;cursor:pointer">'+
+      '<input type="checkbox" class="round-res-cb" value="'+esc(r.id)+'" '+chk+' style="width:15px;height:15px;accent-color:#1a68e0;flex-shrink:0">'+
+      '<div style="flex:1"><div style="font-weight:600;font-size:13px">'+esc(r.name)+'</div>'+
+      '<div style="font-size:12px;color:#8898b0">Room '+esc(r.room)+(r.careLevel?' &middot; '+esc(r.careLevel):'')+'</div></div>'+
+      '<button class="btn s p" onclick="checkInResident(&#39;'+esc(r.id)+'&#39;)" style="flex-shrink:0">Go</button></label>';
+  }).join("");
+}
+function selectAllForRound(){var cbs=document.querySelectorAll(".round-res-cb");for(var i=0;i<cbs.length;i++)cbs[i].checked=true;}
+function startRound(){
+  var typeEl=document.getElementById("roundType");var roundType=typeEl?typeEl.value:"checkin";
+  var cbs=document.querySelectorAll(".round-res-cb");var selected=[];
+  for(var i=0;i<cbs.length;i++){if(cbs[i].checked)selected.push(cbs[i].value);}
+  var s=window._s;var allRes=(s&&s.care&&s.care.residents)||[];
+  var residents=selected.length?allRes.filter(function(r){for(var i=0;i<selected.length;i++){if(selected[i]===r.id)return true;}return false;}):allRes;
+  if(!residents.length)return notice("No residents selected. Add residents first.",false);
+  cmd("start_rounds",{type:roundType,residents:residents.map(function(r){return{id:r.id,name:r.name,room:r.room,mapPoint:r.mapPoint||r.room,checkInPrompt:r.checkInSchedule||""};})});
+}
+function refreshQueue(){
+  get("/api/queue").then(function(out){
+    var count=(out.queue&&out.queue.length)||0;
+    var qc=document.getElementById("queueCount");var ql=document.getElementById("queueList");var qb=document.getElementById("queueBadge");
+    if(qc){qc.textContent=count+" pending";qc.className="pill "+(count?"warn":"off");}
+    if(qb){if(count){qb.textContent=count;qb.style.display="inline-flex";}else qb.style.display="none";}
+    if(ql){if(!count){ql.innerHTML='<div class="esbox" style="min-height:50px">No pending commands. Robot is up to date.</div>';}
+    else{ql.innerHTML=(out.queue||[]).slice(0,10).map(function(c){return rRow("blue",c.action,new Date(c.at||Date.now()).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"}));}).join("")+(count>10?'<p style="font-size:12px;color:#8898b0;margin:8px 0 0">+'+(count-10)+" more</p>":'');}}
+  });
+}
+function clearQueue(){
+  fetch("/api/queue",{method:"DELETE"}).then(function(r){return r.json();}).then(function(out){
+    notice(out.ok?"Command queue cleared":(out.error||"Could not clear"),out.ok);refreshQueue();
+  });
+}
+setInterval(refresh,2000);setInterval(refreshQueue,4000);refresh();refreshQueue();loadUsers();
 document.querySelectorAll('.nav a[data-view]').forEach(function(a){
   a.addEventListener('click',function(e){e.preventDefault();sv(this.getAttribute('data-view'),this);});
 });
@@ -732,7 +784,7 @@ window.onerror=function(msg,src,line){notice('JS Error: '+msg+' (line '+line+')'
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
-  if (url.pathname === "/health") return sendJson(res, 200, { ok: true, version: "v3" });
+  if (url.pathname === "/health") return sendJson(res, 200, { ok: true });
 
   if (url.pathname === "/login" && req.method === "GET") {
     if (currentUser(req) || isAdmin(req)) {
@@ -923,6 +975,15 @@ const server = http.createServer(async (req, res) => {
     if (idx >= 0) facility.alerts.splice(idx, 1);
     facility.logs.push({ createdAt: Date.now(), title: "Alert dismissed", detail: alertId });
     log("alert_dismissed", { id: alertId });
+    return sendJson(res, 200, { ok: true });
+  }
+  if (url.pathname === "/api/queue" && req.method === "GET") {
+    return sendJson(res, 200, { ok: true, queue: commandQueue.map(function(c) { return { id: c.id, action: c.action, at: c.at }; }), count: commandQueue.length });
+  }
+  if (url.pathname === "/api/queue" && req.method === "DELETE") {
+    if (!requireRole(req, res, "admin")) return;
+    commandQueue.splice(0, commandQueue.length);
+    log("queue_cleared", {});
     return sendJson(res, 200, { ok: true });
   }
   sendJson(res, 404, { ok: false, error: "not found" });
