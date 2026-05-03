@@ -290,8 +290,10 @@ select.field{cursor:pointer}
 .tbl td,.tbl th{text-align:left;padding:9px 13px;border-bottom:1px solid #f0f4fa;font-size:13px;vertical-align:top}
 .tbl th{font-size:11px;font-weight:700;color:#8898b0;text-transform:uppercase;letter-spacing:.5px;background:#fafbfd}
 .tbl tr:last-child td{border-bottom:0}
-.toast{position:fixed;right:20px;bottom:24px;background:#0d1f3c;color:white;padding:13px 18px;border-radius:12px;box-shadow:0 8px 30px #00000030;font-weight:600;font-size:14px;z-index:200;max-width:320px;opacity:0;transform:translateY(16px);transition:opacity .22s,transform .22s;pointer-events:none}
+.toast{position:fixed;right:20px;bottom:24px;background:#0d1f3c;color:white;padding:11px 16px;border-radius:12px;box-shadow:0 8px 30px #00000030;font-weight:600;font-size:13.5px;z-index:200;max-width:340px;opacity:0;transform:translateY(16px);transition:opacity .22s,transform .22s;pointer-events:none;border-left:3px solid #1a68e0;display:flex;align-items:center;gap:8px}
 .toast.show{opacity:1;transform:none;pointer-events:auto}
+.toast.t-ok{border-left-color:#1f9950}
+.toast.t-err{border-left-color:#d63b3b;background:#1a0808}
 .lp{width:90px;height:90px;border-radius:14px;border:2px solid #18d0f0;background:#06172e;object-fit:cover;display:block;margin:8px 0}
 .fbox{background:#f5f8fd;border:1px solid #e5eaf3;border-radius:12px;padding:14px;margin-bottom:12px}
 .fl{font-size:11px;font-weight:700;color:#6878a0;text-transform:uppercase;letter-spacing:.5px;display:block;margin:8px 0 3px}
@@ -352,6 +354,7 @@ select.field{cursor:pointer}
 <div class="sidebox">
 <div class="sbt"><span>Nova Robot</span><span id="sideOnline" class="pill off" style="font-size:10px">0 / 1</span></div>
 <div class="sblabel" id="sideHealth">Waiting for robot connection</div>
+<div id="sideBatBar" style="display:none;margin:5px 0 4px"><div style="display:flex;justify-content:space-between;margin-bottom:2px"><span style="font-size:10px;color:#7fa8cc;font-weight:600">Battery</span><span id="sideBatText" style="font-size:10px;font-weight:700;color:#7fa8cc"></span></div><div style="height:5px;background:#ffffff14;border-radius:3px;overflow:hidden"><div id="sideBatFill" style="height:100%;border-radius:3px;transition:width .6s,background .6s"></div></div></div>
 <button class="btn p" style="width:100%;justify-content:center" onclick="cmd('camera_start')">Open Camera</button>
 </div>
 </aside>
@@ -575,9 +578,9 @@ var columns=${JSON.stringify(residentColumns)};
 var T={command:["Command Center","Live data from Nova and your facility registry."],robots:["Robot Feeds","Telemetry and detection feed from Nova."],rounds:["Care Rounds","Build rounds, set schedules, and track check-ins."],residents:["Residents","Manage the resident registry."],alerts:["Alerts","Create urgent alerts and monitor facility events."],map:["Map & Messaging","Live map points from Nova."],logs:["Operations Log","Commands, state updates and facility actions."],settings:["Settings","Relay status, users, logo and CSV format."]};
 function get(p){return fetch(p,{cache:"no-store"}).then(function(r){return r.ok?r.json():{};}).catch(function(){return{};})}
 function post(p,b){return fetch(p,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b)}).then(function(r){return r.json();}).catch(function(){return{ok:false,error:"Network error"};})}
-function cmd(action,params){params=params||{};post("/api/command",{action:action,params:params}).then(function(out){notice(out.ok?"Command sent to Nova":"Error: "+(out.error||"failed"),out.ok);refresh();});}
+function cmd(action,params){params=params||{};notice("Sending...",true);post("/api/command",{action:action,params:params}).then(function(out){notice(out.ok?"Sent: "+action:"Error: "+(out.error||"failed"),out.ok);refresh();});}
 function esc(v){var map={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};return String(v||"").replace(/[&<>"']/g,function(c){return map[c];});}
-function notice(t,ok){if(ok===undefined)ok=true;var el=document.getElementById("toast");if(!el)return;el.textContent=t;el.style.background=ok?"#0d1f3c":"#7a1c1c";el.className="toast show";clearTimeout(notice._t);notice._t=setTimeout(function(){el.className="toast";},3500);}
+function notice(t,ok){if(ok===undefined)ok=true;var el=document.getElementById("toast");if(!el)return;el.innerHTML=(ok?'<span style="color:#2ec47a;font-size:15px;flex-shrink:0">&#10003;</span>':'<span style="color:#ef5350;font-size:15px;flex-shrink:0">&#10005;</span>')+'<span>'+esc(String(t||""))+'</span>';el.className="toast show "+(ok?"t-ok":"t-err");clearTimeout(notice._t);notice._t=setTimeout(function(){el.className="toast";},3800);}
 function sv(name,el){
   var views=document.querySelectorAll(".view");
   for(var i=0;i<views.length;i++){views[i].classList.remove("active");views[i].classList.add("hidden");}
@@ -602,8 +605,9 @@ function medSelected(){var el=document.getElementById("residentSelect");medResid
 function staffAlert(){cmd("staff_alert",{priority:"urgent",message:"Staff assistance requested."});}
 function staffAlertForResident(){var el=document.getElementById("residentSelect");cmd("staff_alert",{priority:"urgent",residentId:(el&&el.value)||"",message:"Assistance requested for resident."});}
 function guideSelected(){var el=document.getElementById("pointSelect");var p=el&&el.value;if(!p||p.indexOf("No ")==0)return notice("No map points received from Nova yet.",false);cmd("visitor_guide",{destination:p});}
-function sendMessage(){var el=document.getElementById("pointSelect");var p=el&&el.value;if(!p||p.indexOf("No ")==0)return notice("No map points received from Nova yet.",false);var mt=document.getElementById("messageText");cmd("message",{destination:p,message:(mt&&mt.value)||"Please meet Nova at this location."});}
+function sendMessage(){var el=document.getElementById("pointSelect");var p=el&&el.value;if(!p||p.indexOf("No ")==0)return notice("No map points received from Nova yet.",false);var mt=document.getElementById("messageText");var msg=(mt&&mt.value.trim())||"Please meet Nova at this location.";cmd("message",{destination:p,message:msg});if(mt)mt.value="";}
 var _eid=null;
+function hlField(id,ok){var el=document.getElementById(id);if(!el)return;el.style.borderColor=ok?"":"#d63b3b";el.style.boxShadow=ok?"":"0 0 0 3px rgba(214,59,59,.12)";}
 function editResident(id){
   var r=byId(id);if(!r)return notice("Resident not loaded yet. Try again.",false);
   _eid=id;
@@ -620,6 +624,7 @@ function editResident(id){
 function cancelEdit(){
   _eid=null;
   ["manualName","manualRoom","manualMapPoint","manualWing","manualCare","manualPhone","manualNotes","manualPrompt"].forEach(function(fid){var el=document.getElementById(fid);if(el)el.value="";});
+  hlField("manualName",true);hlField("manualRoom",true);
   document.getElementById("saveResBtn").textContent="Add Resident";
   document.getElementById("resFormTitle").textContent="Add Resident";
   var eb=document.getElementById("editBanner");if(eb)eb.style.display="none";
@@ -627,6 +632,7 @@ function cancelEdit(){
 function saveResident(){
   var nameEl=document.getElementById("manualName");var roomEl=document.getElementById("manualRoom");
   var name=nameEl&&nameEl.value.trim();var room=roomEl&&roomEl.value.trim();
+  hlField("manualName",!!name);hlField("manualRoom",!!room);
   if(!name)return notice("Full name is required.",false);
   if(!room)return notice("Room is required.",false);
   var mpEl=document.getElementById("manualMapPoint");var mapPoint=(mpEl&&mpEl.value.trim())||room;
@@ -728,6 +734,7 @@ function moveResidentUp(id){
   if(idx<=0)return;
   var tmp=order[idx-1];order[idx-1]=order[idx];order[idx]=tmp;
   window._roundOrder=order;
+  fetch("/api/round-order",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({order:order})});
   var s=window._s;renderRoundPicker((s&&s.care&&s.care.residents)||[]);
 }
 function moveResidentDown(id){
@@ -735,6 +742,7 @@ function moveResidentDown(id){
   if(idx<0||idx>=order.length-1)return;
   var tmp=order[idx+1];order[idx+1]=order[idx];order[idx]=tmp;
   window._roundOrder=order;
+  fetch("/api/round-order",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({order:order})});
   var s=window._s;renderRoundPicker((s&&s.care&&s.care.residents)||[]);
 }
 function sortedResidents(res){
@@ -939,13 +947,18 @@ function renderAll(s){
   function ht(id,v){var e=gi(id);if(e)e.innerHTML=v;}
   st("statRobot",s.online?"Online":"Offline");st("statResidents",res.length);st("statPoints",pts.length);st("statPeople",ppl.length);st("statCamera",s.camera?"Active":"Off");
   var so=gi("sideOnline");if(so){so.textContent=(s.online?"1":"0")+" / 1";so.className="pill "+(s.online?"ok":"off");}
-  var shParts=[];if(s.online){shParts.push("Last seen "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"}));if(bat)shParts.push("Battery: "+bat);if(dest)shParts.push("At: "+dest);}
-  st("sideHealth",s.online?shParts.join(" &middot; "):"Waiting for robot connection");
-  var op=gi("onlinePill");if(op){op.textContent=s.online?"Online":"Offline";op.className="pill "+(s.online?"ok":"off");}
-  var ac=gi("alertCount");if(ac){if(al.length){ac.style.display="inline-flex";ac.textContent=al.length+" alert"+(al.length===1?"":"s");ac.className="pill bad";}else ac.style.display="none";}
   var status=s.status||{};
   var bat=esc(status.battery||"");var dest=esc(status.destination||"");var stat=esc(status.status||"");
-  var robotHtml='<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f0f4fa"><div class="dot c-'+(s.online?"blue":"red")+'" style="width:42px;height:42px;font-size:16px">N</div><div style="flex:1"><div style="font-weight:700;font-size:14px">Nova 01</div><div style="font-size:12px;color:#8898b0;margin-top:2px">'+(dest||"No active destination")+"</div></div>"+(s.online?'<span class="pill ok">Online</span>':'<span class="pill off">Offline</span>')+"</div>"+(bat?'<div style="margin-top:8px;font-size:12px;color:#5a6a80"><b style="color:#374151">Battery:</b> '+bat+"</div>":"")+(stat?'<div style="margin-top:4px;font-size:12px;color:#5a6a80"><b style="color:#374151">Status:</b> '+stat+"</div>":"");
+  var batPct=(function(){var m=String(status.battery||"").match(/(\d+)/);return m?parseInt(m[1],10):-1;})();
+  var batColor=batPct>50?"#1f9950":batPct>20?"#d49600":"#d63b3b";
+  var shParts=[];if(s.online){shParts.push("Seen "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"}));if(bat)shParts.push(bat);if(dest)shParts.push(dest);}
+  ht("sideHealth",s.online?shParts.join(" &middot; "):"Waiting for robot connection");
+  var sbb=gi("sideBatBar");var sbf=gi("sideBatFill");var sbtt=gi("sideBatText");
+  if(s.online&&batPct>=0){if(sbb)sbb.style.display="block";if(sbtt)sbtt.textContent=batPct+"%";if(sbf){sbf.style.width=Math.min(100,batPct)+"%";sbf.style.background=batColor;}}else{if(sbb)sbb.style.display="none";}
+  var op=gi("onlinePill");if(op){op.textContent=s.online?"Online":"Offline";op.className="pill "+(s.online?"ok":"off");}
+  var ac=gi("alertCount");if(ac){if(al.length){ac.style.display="inline-flex";ac.textContent=al.length+" alert"+(al.length===1?"":"s");ac.className="pill bad";}else ac.style.display="none";}
+  var batNum=batPct>=0?batPct:0;
+  var robotHtml='<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f0f4fa"><div class="dot c-'+(s.online?"blue":"red")+'" style="width:42px;height:42px;font-size:16px">N</div><div style="flex:1"><div style="font-weight:700;font-size:14px">Nova 01</div><div style="font-size:12px;color:#8898b0;margin-top:2px">'+(dest||"No active destination")+"</div></div>"+(s.online?'<span class="pill ok">Online</span>':'<span class="pill off">Offline</span>')+"</div>"+(bat?'<div style="margin-top:10px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><span style="font-size:11px;color:#5a6a80;font-weight:600">Battery</span><span style="font-size:12px;font-weight:700;color:'+batColor+'">'+bat+'</span></div><div style="height:5px;background:#f0f4fa;border-radius:3px;overflow:hidden"><div style="height:100%;width:'+Math.min(100,batNum)+'%;background:'+batColor+';border-radius:3px;transition:width .6s"></div></div></div>':"")+(stat?'<div style="margin-top:6px;font-size:12px;color:#5a6a80"><b style="color:#374151">Status:</b> '+stat+"</div>":"");
   ht("robotBox",robotHtml);ht("robotsFleet",robotHtml);
   ht("residentBox",res.length?res.slice(0,4).map(function(r){return'<div class="row"><div class="dot c-purple">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+esc(r.room)+'</span></div><div class="ra"><button class="btn s p" onclick="checkInResident(&#39;'+esc(r.id)+'&#39;)">Go</button></div></div>';}).join("")+(res.length>4?'<p style="font-size:12px;color:#8898b0;margin:8px 0 0">+'+(res.length-4)+" more</p>":""):esb("No residents yet."));
   ht("alertBox",al.length?al.slice(0,3).map(function(a){return'<div class="row"><div class="dot c-'+(a.priority!=="standard"?"red":"yellow")+'">!</div><div class="rb"><b>'+esc((a.message||"Alert").slice(0,60))+'</b><span>'+esc(a.room||"Facility")+'</span></div><div class="ra"><button class="btn s d" onclick="dismissAlert(&#39;'+esc(a.id)+'&#39;)">&#215;</button></div></div>';}).join("")+(al.length>3?'<p style="font-size:12px;color:#8898b0;margin:8px 0 0">+'+(al.length-3)+" more</p>":""):esb("No active alerts."));
@@ -964,8 +977,8 @@ function renderAll(s){
   var rs=gi("residentSelect");if(rs)rs.innerHTML=res.length?res.map(function(r){return'<option value="'+esc(r.id)+'">'+esc(r.name)+" &mdash; Room "+esc(r.room)+"</option>";}).join(""):"<option disabled>No residents registered yet</option>";
   renderAlertCenter(al);
   var ps2=gi("pointSelect");if(ps2)ps2.innerHTML=pts.length?pts.map(function(p){return'<option value="'+esc(p.name)+'">'+esc(p.name)+"</option>";}).join(""):"<option disabled>No map points from Nova yet</option>";
-  var cLogs=c.logs||[];var eLogs=(s.events||[]).slice().reverse().map(function(e){return{createdAt:e.at,title:e.type,detail:typeof e.data==="object"?Object.keys(e.data||{}).slice(0,4).map(function(k){return k+": "+String(e.data[k]).slice(0,40);}).join(", "):String(e.data||"")};});
-  var logRows=cLogs.concat(eLogs);
+  var cLogs=c.logs||[];var eLogs=(s.events||[]).map(function(e){return{createdAt:e.at,title:e.type,detail:typeof e.data==="object"?Object.keys(e.data||{}).slice(0,4).map(function(k){return k+": "+String(e.data[k]).slice(0,40);}).join(", "):String(e.data||"")};});
+  var logRows=cLogs.concat(eLogs).sort(function(a,b){return(b.createdAt||0)-(a.createdAt||0);});
   ht("opsLog",(logRows.length?logRows:[{title:"Ready",detail:"Waiting for robot and facility activity."}]).slice(0,80).map(function(l){return'<tr><td style="width:75px;white-space:nowrap;color:#8898b0;font-size:12px">'+new Date(l.createdAt||Date.now()).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})+'</td><td style="font-weight:600;font-size:13px">'+esc(l.title||"Event")+'</td><td style="font-size:12px;color:#5a6a80">'+esc(String(l.detail||"").slice(0,140))+"</td></tr>";}).join(""));
   var fh={resident_id:"Optional — auto-generated if blank.",full_name:"Required.",room:"Required.",map_point:"Exact Nova map point name.",wing:"Optional.",care_level:"Independent / Assisted / High.",primary_contact_name:"Optional.",primary_contact_phone:"Optional.",medication_notes:"Medication schedule.",mobility_notes:"Mobility aids and restrictions.",preferred_language:"Communication preference.",check_in_schedule:"e.g. daily 09:00",emergency_notes:"Critical staff notes."};
   ht("formatRows",columns.map(function(col){return'<tr><td style="font-weight:700;font-size:12px;white-space:nowrap">'+col+'</td><td style="font-size:12px;color:#5a6a80">'+esc(fh[col]||"")+"</td></tr>";}).join(""));
