@@ -319,6 +319,12 @@ select.field{cursor:pointer}
 .cam-wrap{position:relative;width:100%;background:#060e1c;border-radius:12px;overflow:hidden;aspect-ratio:16/9}
 .cam-wrap img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:opacity .38s}
 .cam-overlay{position:absolute;top:10px;left:10px;display:flex;align-items:center;gap:5px;pointer-events:none}
+.expand-btn{width:100%;background:none;border:0;border-top:1px solid #eef2f8;color:#1a68e0;font-size:12px;font-weight:700;padding:10px 0;cursor:pointer;text-align:center;letter-spacing:.1px;display:block;margin-top:4px}
+.expand-btn:hover{background:#f5f8ff;border-radius:0 0 10px 10px}
+.edit-banner{background:#fff8e1;border:1px solid #f0d050;border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:13px;font-weight:600;color:#7a4500;display:none;align-items:center;gap:8px}
+.sch-res-row{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid #f0f4fa;cursor:pointer;transition:background .1s}
+.sch-res-row:last-child{border-bottom:0}
+.sch-res-row:hover{background:#f5f8fd}
 </style></head><body><div class="app">
 <aside class="side">
 <div class="brand">
@@ -393,7 +399,7 @@ select.field{cursor:pointer}
 <section class="view" id="view-rounds">
 <div class="g3t">
 <div class="card">
-<div class="ch">Round Builder<button class="btn s" onclick="selectAllForRound()">Select All</button></div>
+<div class="ch">Round Builder<div style="display:flex;gap:4px"><button class="btn s" onclick="selectAllForRound(true)">All</button><button class="btn s" onclick="selectAllForRound(false)">None</button></div></div>
 <label class="fl">Round Type</label>
 <select class="field" id="roundType" style="margin-bottom:10px">
 <option value="checkin">Check-in Round</option>
@@ -401,8 +407,8 @@ select.field{cursor:pointer}
 <option value="full">Full Care (Check-in + Medication)</option>
 </select>
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-<span style="font-size:11px;font-weight:700;color:#6878a0;text-transform:uppercase;letter-spacing:.5px">Visit Order</span>
-<span style="font-size:11px;color:#8898b0">&#9650;&#9660; drag to reorder</span>
+<span style="font-size:11px;font-weight:700;color:#6878a0;text-transform:uppercase;letter-spacing:.5px">Visit Order <span id="roundSelCount" style="font-weight:500;color:#8898b0;text-transform:none;letter-spacing:0"></span></span>
+<span style="font-size:11px;color:#8898b0">&#9650;&#9660; to reorder</span>
 </div>
 <div id="roundResidentPicker" style="border:1px solid #e5eaf3;border-radius:10px;overflow:hidden;max-height:360px;overflow-y:auto;margin-bottom:12px"></div>
 <button class="btn p" style="width:100%;justify-content:center" onclick="startRound()">&#8635;&nbsp; Start This Round</button>
@@ -425,6 +431,14 @@ select.field{cursor:pointer}
 <option value="thu">Thursdays only</option>
 <option value="fri">Fridays only</option>
 </select>
+<label class="fl" style="margin-top:8px">Include in Round</label>
+<div style="background:#f5f8fd;border:1px solid #e5eaf3;border-radius:10px;padding:10px;margin-bottom:10px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
+<span style="font-size:11px;color:#5a6a80;font-weight:600">Who Nova will visit</span>
+<div style="display:flex;gap:4px"><button type="button" class="btn s" onclick="schSelAll(true)">All</button><button type="button" class="btn s" onclick="schSelAll(false)">None</button></div>
+</div>
+<div id="schResPicker" style="max-height:160px;overflow-y:auto"><div class="esbox" style="min-height:40px;font-size:12px">Add residents first.</div></div>
+</div>
 <button class="btn p s" onclick="saveSchedule()">&#43; Add Schedule</button>
 </div>
 </div>
@@ -443,6 +457,7 @@ select.field{cursor:pointer}
 <div class="g2">
 <div class="card" id="resFormCard">
 <div class="ch"><span id="resFormTitle">Add Resident</span></div>
+<div id="editBanner" class="edit-banner">&#9998;&nbsp;<span id="editBannerName"></span><button class="btn s" onclick="cancelEdit()" style="margin-left:auto">&#10005; Cancel</button></div>
 <div class="fbox">
 <label class="fl">Full Name *</label><input class="field" id="manualName" placeholder="e.g. Mary Collins">
 <div class="ir"><div class="iw"><label class="fl">Room *</label><input class="field" id="manualRoom" placeholder="204"></div><div class="iw"><label class="fl">Map Point</label><input class="field" id="manualMapPoint" placeholder="Room 204"></div></div>
@@ -453,7 +468,6 @@ select.field{cursor:pointer}
 </div>
 <div style="display:flex;gap:8px;align-items:center">
 <button class="btn p" id="saveResBtn" onclick="saveResident()">Add Resident</button>
-<button class="btn" id="cancelEditBtn" style="display:none" onclick="cancelEdit()">Cancel</button>
 </div>
 <div style="margin-top:18px;padding-top:16px;border-top:1px solid #eef2f8">
 <div class="ch" style="margin-bottom:10px">Import via CSV</div>
@@ -521,7 +535,7 @@ select.field{cursor:pointer}
 <div class="card">
 <div class="ch">Cloud Relay Status</div>
 <div id="settingsRelay"></div>
-<div style="margin-top:14px;display:flex;flex-wrap:wrap;gap:6px"><button class="btn p s" onclick="cmd('camera_start')">Test Camera</button><button class="btn s" onclick="cmd('security_start')">Test Detection</button></div>
+<div style="margin-top:14px;display:flex;flex-wrap:wrap;gap:6px"><button class="btn p s" onclick="cmd(&#39;camera_start&#39;)">Test Camera</button><button class="btn s" onclick="cmd(&#39;security_start&#39;)">Test Detection</button><a class="btn s" href="/api/export" download>&#8681; Export Backup</a></div>
 <div style="margin-top:20px;padding-top:16px;border-top:1px solid #eef2f8">
 <div class="ch" style="margin-bottom:10px">Brand Logo</div>
 <img class="lp" id="logoPreview" src="${brandLogoDataUrl || ""}" alt="Logo">
@@ -590,8 +604,9 @@ function editResident(id){
   var fields={manualName:r.name,manualRoom:r.room,manualMapPoint:r.mapPoint||r.room,manualWing:r.wing||"",manualCare:r.careLevel||"",manualPhone:r.contactPhone||"",manualNotes:[r.medicationNotes,r.mobilityNotes,r.emergencyNotes].filter(Boolean).join("; "),manualPrompt:r.checkInSchedule||""};
   Object.keys(fields).forEach(function(fid){var el=document.getElementById(fid);if(el)el.value=fields[fid];});
   document.getElementById("saveResBtn").textContent="Save Changes";
-  document.getElementById("cancelEditBtn").style.display="inline-flex";
   document.getElementById("resFormTitle").textContent="Edit Resident";
+  var eb=document.getElementById("editBanner");var ebn=document.getElementById("editBannerName");
+  if(eb){eb.style.display="flex";}if(ebn)ebn.textContent=r.name;
   sv("residents",document.querySelector('[data-view="residents"]'));
   setTimeout(function(){var fc=document.getElementById("resFormCard");if(fc)fc.scrollIntoView({behavior:"smooth",block:"start"});},100);
   var mn=document.getElementById("manualName");if(mn)mn.focus();
@@ -600,8 +615,8 @@ function cancelEdit(){
   _eid=null;
   ["manualName","manualRoom","manualMapPoint","manualWing","manualCare","manualPhone","manualNotes","manualPrompt"].forEach(function(fid){var el=document.getElementById(fid);if(el)el.value="";});
   document.getElementById("saveResBtn").textContent="Add Resident";
-  document.getElementById("cancelEditBtn").style.display="none";
   document.getElementById("resFormTitle").textContent="Add Resident";
+  var eb=document.getElementById("editBanner");if(eb)eb.style.display="none";
 }
 function saveResident(){
   var nameEl=document.getElementById("manualName");var roomEl=document.getElementById("manualRoom");
@@ -726,7 +741,7 @@ function renderRoundPicker(res){
     var lastStr=lastCI?timeAgo(lastCI):"Never";
     return '<div class="res-row">'+
       '<span class="round-num">'+(idx+1)+'</span>'+
-      '<input type="checkbox" class="round-res-cb" value="'+esc(r.id)+'" '+chk+' style="width:15px;height:15px;accent-color:#1a68e0;flex-shrink:0">'+
+      '<input type="checkbox" class="round-res-cb" value="'+esc(r.id)+'" '+chk+' onchange="updateRoundSelCount()" style="width:15px;height:15px;accent-color:#1a68e0;flex-shrink:0">'+
       '<div style="flex:1;min-width:0">'+
         '<div style="font-weight:600;font-size:13px">'+esc(r.name)+'</div>'+
         '<div style="font-size:11px;color:#8898b0">Room '+esc(r.room)+(r.careLevel?' &middot; '+esc(r.careLevel):'')+' &middot; Last: '+lastStr+'</div>'+
@@ -736,8 +751,11 @@ function renderRoundPicker(res){
         '<button class="ord-btn" onclick="moveResidentDown(&#39;'+esc(r.id)+'&#39;)" '+(idx===sorted.length-1?'disabled':'')+'>&#9660;</button>'+
       '</div></div>';
   }).join('');
+  updateRoundSelCount();
 }
-function selectAllForRound(){var cbs=document.querySelectorAll(".round-res-cb");for(var i=0;i<cbs.length;i++)cbs[i].checked=true;}
+function selectAllForRound(v){if(v===undefined)v=true;var cbs=document.querySelectorAll(".round-res-cb");for(var i=0;i<cbs.length;i++)cbs[i].checked=v;updateRoundSelCount();}
+function updateRoundSelCount(){var cbs=document.querySelectorAll(".round-res-cb");var total=cbs.length,checked=0;for(var i=0;i<cbs.length;i++){if(cbs[i].checked)checked++;}var el=document.getElementById("roundSelCount");if(el)el.textContent=total?"("+checked+" of "+total+")":"";}
+function goRounds(){var a=document.querySelector('.nav a[data-view="rounds"]');sv("rounds",a);}
 function startRound(){
   var typeEl=document.getElementById("roundType");var roundType=typeEl?typeEl.value:"checkin";
   var cbs=document.querySelectorAll(".round-res-cb");var selected=[];
@@ -756,18 +774,36 @@ function renderSchedules(schedules){
   var active=schedules.filter(function(s){return s.enabled;}).length;
   if(sb){if(active){sb.textContent=active+" active";sb.style.display="inline-flex";}else sb.style.display="none";}
   if(!schedules.length){el.innerHTML=esb("No scheduled rounds yet. Add one below.");return;}
+  var allRes=(window._s&&window._s.care&&window._s.care.residents)||[];
+  function resLabel(s){
+    if(!s.residentIds||!s.residentIds.length)return"All residents"+(allRes.length?" ("+allRes.length+")":"");
+    var names=[];
+    for(var i=0;i<s.residentIds.length;i++){for(var j=0;j<allRes.length;j++){if(allRes[j].id===s.residentIds[i]){names.push(allRes[j].name.split(" ")[0]);break;}}}
+    if(!names.length)return s.residentIds.length+" residents";
+    var extra=names.length-3;
+    return names.slice(0,3).join(", ")+(extra>0?" +"+extra+" more":"");
+  }
   el.innerHTML=schedules.map(function(s){
     var dLabel=Array.isArray(s.days)?s.days.join(", "):String(s.days||"daily");
+    var tc=s.type==="medication"?"#fef3d0":s.type==="full"?"#f0eaff":"#e4edff";
+    var tcc=s.type==="medication"?"#8f5c00":s.type==="full"?"#5830a8":"#1448b8";
+    var tl=s.type==="medication"?"Medication":s.type==="full"?"Full Care":"Check-in";
     return '<div class="sch-item">'+
       '<div style="flex:1;min-width:0">'+
-        '<div style="font-weight:700;font-size:13px">'+esc(s.name)+'</div>'+
-        '<div style="font-size:12px;color:#8898b0;margin-top:2px">'+esc(s.type)+' &middot; '+esc(s.time)+' &middot; '+esc(dLabel)+'</div>'+
-        (s.lastRun?'<div style="font-size:11px;color:#b0b8cc;margin-top:1px">Last run: '+esc(s.lastRun.split(' ').slice(0,4).join(' '))+'</div>':'')+
+        '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px">'+
+          '<b style="font-size:13px">'+esc(s.name)+'</b>'+
+          '<span class="pill '+(s.enabled?"ok":"off")+'" style="font-size:10px">'+(s.enabled?"ON":"OFF")+'</span>'+
+          '<span style="border-radius:5px;padding:2px 6px;font-size:10px;font-weight:800;background:'+tc+';color:'+tcc+'">'+tl+'</span>'+
+        '</div>'+
+        '<div style="font-size:12px;color:#5a6a80">'+esc(s.time)+' &middot; '+esc(dLabel)+'</div>'+
+        '<div style="font-size:12px;color:#1a68e0;font-weight:600;margin-top:3px">&#9673;&nbsp;'+esc(resLabel(s))+'</div>'+
+        (s.lastRun?'<div style="font-size:11px;color:#b0b8cc;margin-top:2px">Last: '+esc(s.lastRun.split(" ").slice(0,4).join(" "))+'</div>':'')+
       '</div>'+
-      '<div style="display:flex;gap:5px;align-items:center;flex-shrink:0">'+
+      '<div style="display:flex;flex-direction:column;gap:5px;align-items:flex-end;flex-shrink:0;margin-left:8px">'+
         '<button class="btn s '+(s.enabled?"p":"")+'" onclick="toggleSchedule(&#39;'+esc(s.id)+'&#39;)">'+(s.enabled?"ON":"OFF")+'</button>'+
-        '<button class="btn s d" onclick="deleteSchedule(&#39;'+esc(s.id)+'&#39;)" title="Delete">&#10005;</button>'+
-      '</div></div>';
+        '<button class="btn s d" onclick="deleteSchedule(&#39;'+esc(s.id)+'&#39;)">&#10005;</button>'+
+      '</div>'+
+    '</div>';
   }).join('');
 }
 function saveSchedule(){
@@ -777,7 +813,11 @@ function saveSchedule(){
   var time=(timeEl&&timeEl.value)||"09:00";
   var daysRaw=(daysEl&&daysEl.value)||"daily";
   var days=daysRaw==="weekdays"?["mon","tue","wed","thu","fri"]:daysRaw==="weekends"?["sat","sun"]:daysRaw;
-  post("/api/schedules",{name:name,type:(typeEl&&typeEl.value)||"checkin",time:time,days:days,enabled:true}).then(function(out){
+  var cbs=document.querySelectorAll(".sch-res-cb");
+  var residentIds=[],allChecked=true;
+  for(var i=0;i<cbs.length;i++){if(cbs[i].checked)residentIds.push(cbs[i].value);else allChecked=false;}
+  if(allChecked||!cbs.length)residentIds=[];
+  post("/api/schedules",{name:name,type:(typeEl&&typeEl.value)||"checkin",time:time,days:days,residentIds:residentIds,enabled:true}).then(function(out){
     notice(out.ok?"Schedule saved":(out.error||"Could not save"),out.ok);
     if(out.ok&&n)n.value="";refresh();
   });
@@ -793,15 +833,23 @@ function toggleSchedule(id){
     notice(out.ok?(out.enabled?"Schedule enabled":"Schedule paused"):(out.error||"Could not toggle"),out.ok);refresh();
   });
 }
+var _histExpanded=false;
 function renderRoundHistory(history){
   var el=document.getElementById("roundHistoryList");if(!el)return;
   if(!history||!history.length){el.innerHTML=esb("No rounds have run yet.");return;}
-  el.innerHTML=history.slice(0,8).map(function(h){
-    var typeLabel=h.type==="medication"?"Medication":h.type==="full"?"Full Care":"Check-in";
-    var trigLabel=h.trigger==="schedule"?"Scheduled":"Manual";
-    return rRow("green",esc(h.name||"Round"),typeLabel+" &middot; "+h.count+" residents &middot; "+timeAgo(h.at)+" &middot; "+trigLabel);
+  var limit=5;
+  var show=_histExpanded?history:history.slice(0,limit);
+  function tl(t){return t==="medication"?"Medication":t==="full"?"Full Care":"Check-in";}
+  var html=show.map(function(h){
+    var trig=h.trigger==="schedule"?'<span class="pill ok" style="font-size:10px">Sched</span>':'<span class="pill low" style="font-size:10px">Manual</span>';
+    return '<div class="row"><div class="dot c-green" style="font-size:12px">&#8635;</div><div class="rb"><b>'+esc(h.name||"Round")+'</b><span>'+tl(h.type)+' &middot; '+h.count+' residents &middot; '+timeAgo(h.at)+'</span></div><div class="ra">'+trig+'</div></div>';
   }).join('');
+  if(history.length>limit){
+    html+='<button class="expand-btn" onclick="toggleHist()">'+(_histExpanded?"Show less &#8593;":"Show "+(history.length-limit)+" more &#8595;")+'</button>';
+  }
+  el.innerHTML=html;
 }
+function toggleHist(){_histExpanded=!_histExpanded;var s=window._s;renderRoundHistory((s&&s.roundHistory)||[]);}
 function refreshQueue(){
   get("/api/queue").then(function(out){
     var count=(out.queue&&out.queue.length)||0;
@@ -819,6 +867,49 @@ function clearQueue(){
     notice(out.ok?"Command queue cleared":(out.error||"Could not clear"),out.ok);refreshQueue();
   });
 }
+function renderSchResidentPicker(res){
+  var el=document.getElementById("schResPicker");if(!el)return;
+  if(!res||!res.length){el.innerHTML='<div class="esbox" style="min-height:40px;font-size:12px">Add residents first.</div>';return;}
+  el.innerHTML=res.map(function(r){
+    return '<label class="sch-res-row">'+
+      '<input type="checkbox" class="sch-res-cb" value="'+esc(r.id)+'" checked style="width:14px;height:14px;accent-color:#1a68e0;flex-shrink:0">'+
+      '<span style="font-weight:600;font-size:13px">'+esc(r.name)+'</span>'+
+      '<span style="color:#8898b0;font-size:11px;margin-left:auto;flex-shrink:0">Room '+esc(r.room)+'</span>'+
+    '</label>';
+  }).join('');
+}
+function schSelAll(v){var cbs=document.querySelectorAll(".sch-res-cb");for(var i=0;i<cbs.length;i++)cbs[i].checked=v;}
+var _resDirExpanded=false;
+function renderResidentDirectory(res,checkIns){
+  var el=document.getElementById("residentDirectory");if(!el)return;
+  checkIns=checkIns||{};
+  if(!res.length){el.innerHTML=esb("No residents. Add one using the form.");return;}
+  var limit=6;
+  var show=_resDirExpanded?res:res.slice(0,limit);
+  var html=show.map(function(r){
+    var lastCI=checkIns[r.id];
+    var sub='Room '+esc(r.room)+(r.wing?' &middot; Wing '+esc(r.wing):'')+(r.careLevel?' &mdash; '+esc(r.careLevel):'')+(lastCI?' &middot; Seen '+timeAgo(lastCI):'');
+    return '<div class="row"><div class="dot c-purple">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+sub+'</span></div><div class="ra"><button class="btn s" onclick="editResident(&#39;'+esc(r.id)+'&#39;)">Edit</button><button class="btn s d" onclick="deleteResident(&#39;'+esc(r.id)+'&#39;)">Remove</button></div></div>';
+  }).join('');
+  if(res.length>limit){
+    html+='<button class="expand-btn" onclick="toggleResDir()">'+(_resDirExpanded?"Show less &#8593;":"Show "+(res.length-limit)+" more &#8595;")+'</button>';
+  }
+  el.innerHTML=html;
+}
+function toggleResDir(){_resDirExpanded=!_resDirExpanded;var s=window._s;renderResidentDirectory((s&&s.care&&s.care.residents)||[],(s&&s.facility&&s.facility.checkIns)||{});}
+var _alertsExpanded=false;
+function renderAlertCenter(al){
+  var el=document.getElementById("alertCenter");if(!el)return;
+  if(!al.length){el.innerHTML=esb("No active alerts.");return;}
+  var limit=4;
+  var show=_alertsExpanded?al:al.slice(0,limit);
+  var html=show.map(aCard).join('');
+  if(al.length>limit){
+    html+='<button class="expand-btn" onclick="toggleAlerts()">'+(_alertsExpanded?"Show less &#8593;":"Show "+(al.length-limit)+" more &#8595;")+'</button>';
+  }
+  el.innerHTML=html;
+}
+function toggleAlerts(){_alertsExpanded=!_alertsExpanded;var s=window._s;renderAlertCenter((s&&s.care&&s.care.alerts)||[]);}
 function renderAll(s){
   if(!s||typeof s!=="object")return;
   var c=s.care||{};var res=c.residents||[];var rem=c.reminders||[];var al=c.alerts||[];var pts=s.points||[];var ppl=s.people||[];
@@ -847,11 +938,12 @@ function renderAll(s){
   ht("roundResidents",res.length?res.map(function(r){var lastCI=checkIns[r.id];var lastStr=lastCI?timeAgo(lastCI):"Never";return'<div class="row"><div class="dot c-blue">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>Room '+esc(r.room)+' &middot; Last check-in: '+lastStr+'</span></div><div class="ra"><button class="btn s p" onclick="checkInResident(&#39;'+esc(r.id)+'&#39;)">Check In</button><button class="btn s" onclick="medResident(&#39;'+esc(r.id)+'&#39;)">Med</button></div></div>';}).join(""):esb("Add residents to begin care rounds."));
   ht("roundSchedule",rem.length?rem.map(function(r){return rRow("green",r.timeLabel||"Scheduled",r.title||"Reminder");}).join(""):esb("No reminders from Nova."));
   renderRoundPicker(res);
+  renderSchResidentPicker(res);
   renderSchedules(s.scheduledRounds||[]);
   renderRoundHistory(s.roundHistory||[]);
-  ht("residentDirectory",res.length?res.map(function(r){var lastCI=checkIns[r.id];var sub=r.room+(r.wing?" &middot; Wing "+r.wing:"")+(r.careLevel?" &mdash; "+r.careLevel:"")+(lastCI?" &middot; Seen "+timeAgo(lastCI):"");return'<div class="row"><div class="dot c-purple">'+esc(r.name[0]||"?")+'</div><div class="rb"><b>'+esc(r.name)+'</b><span>'+sub+'</span></div><div class="ra"><button class="btn s" onclick="editResident(&#39;'+esc(r.id)+'&#39;)">Edit</button><button class="btn s d" onclick="deleteResident(&#39;'+esc(r.id)+'&#39;)">Remove</button></div></div>';}).join(""):esb("No residents. Add one using the form."));
+  renderResidentDirectory(res,checkIns);
   var rs=gi("residentSelect");if(rs)rs.innerHTML=res.length?res.map(function(r){return'<option value="'+esc(r.id)+'">'+esc(r.name)+" &mdash; Room "+esc(r.room)+"</option>";}).join(""):"<option disabled>No residents registered yet</option>";
-  ht("alertCenter",al.length?al.map(aCard).join(""):esb("No active alerts."));
+  renderAlertCenter(al);
   var ps2=gi("pointSelect");if(ps2)ps2.innerHTML=pts.length?pts.map(function(p){return'<option value="'+esc(p.name)+'">'+esc(p.name)+"</option>";}).join(""):"<option disabled>No map points from Nova yet</option>";
   var cLogs=c.logs||[];var eLogs=(s.events||[]).slice().reverse().map(function(e){return{createdAt:e.at,title:e.type,detail:typeof e.data==="object"?Object.keys(e.data||{}).slice(0,4).map(function(k){return k+": "+String(e.data[k]).slice(0,40);}).join(", "):String(e.data||"")};});
   var logRows=cLogs.concat(eLogs);
@@ -1104,6 +1196,13 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/api/queue" && req.method === "DELETE") {
     if (!requireRole(req, res, "admin")) return;
     commandQueue.splice(0, commandQueue.length); log("queue_cleared", {}); return sendJson(res, 200, { ok: true });
+  }
+  if (url.pathname === "/api/export" && req.method === "GET") {
+    if (!requireRole(req, res, "admin")) return;
+    const snap = JSON.stringify({ residents: facility.residents, reminders: facility.reminders, alerts: facility.alerts, scheduledRounds, roundHistory, roundOrder: facility.roundOrder, checkIns: facility.checkIns }, null, 2);
+    const fname = "nova-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8", "content-disposition": `attachment; filename="${fname}"`, "cache-control": "no-store" });
+    return res.end(snap);
   }
   sendJson(res, 404, { ok: false, error: "not found" });
 });
