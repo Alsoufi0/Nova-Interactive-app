@@ -1223,6 +1223,12 @@ const server = http.createServer(async (req, res) => {
       robotResidentsSynced = false;
       return sendJson(res, 200, { ok: true });
     }
+    if (url.pathname === "/robot/planned-visits" && req.method === "GET") {
+      return sendJson(res, 200, { ok: true, plannedVisits: [] });
+    }
+    if (url.pathname === "/robot/visit-log" && req.method === "POST") {
+      return sendJson(res, 200, { ok: true });
+    }
     if (url.pathname === "/robot/result" && req.method === "POST") {
       const data = JSON.parse((await readBody(req)) || "{}");
       const p = data.params || {};
