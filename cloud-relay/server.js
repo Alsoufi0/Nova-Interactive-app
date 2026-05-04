@@ -282,7 +282,7 @@ body{margin:0;background:#eef2f7;color:#111827;font-family:Inter,system-ui,-appl
 .top .sub{font-size:12px;color:#8898b0;margin-top:2px}
 .topRight{display:flex;gap:8px;align-items:center}
 .content{padding:20px;flex:1}
-.view{display:none}.view.active{display:block}
+.view{display:none}.view.active{display:block}.view.hidden{display:none}
 #view-command{display:block}
 #view-command.hidden{display:none}
 .g5{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
@@ -360,7 +360,7 @@ select.field{cursor:pointer}
 @keyframes fadeInUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
 @keyframes rippleAnim{to{transform:scale(5);opacity:0}}
 @keyframes livePulse{0%,100%{box-shadow:0 0 0 0 rgba(229,62,62,.55)}70%{box-shadow:0 0 0 9px rgba(229,62,62,0)}}
-@keyframes fadeInUp{from{opacity:0;transform:translateY(22px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes slideIn{from{opacity:0;transform:translateY(22px) scale(.97)}to{opacity:1;transform:none}}
 .view.active{animation:fadeInUp .26s cubic-bezier(.22,.68,0,1) both}
 .tile{position:relative;overflow:hidden}.tile:active{transform:translateY(-2px) scale(.97)}
 .ripple-el{position:absolute;border-radius:50%;background:rgba(255,255,255,.28);transform:scale(0);animation:rippleAnim .52s linear;pointer-events:none}
@@ -693,9 +693,8 @@ function esc(v){var map={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#3
 function notice(t,ok){if(ok===undefined)ok=true;var el=document.getElementById("toast");if(!el)return;el.innerHTML=(ok?'<span style="color:#2ec47a;font-size:15px;flex-shrink:0">&#10003;</span>':'<span style="color:#ef5350;font-size:15px;flex-shrink:0">&#10005;</span>')+'<span>'+esc(String(t||""))+'</span>';el.className="toast show "+(ok?"t-ok":"t-err");clearTimeout(notice._t);notice._t=setTimeout(function(){el.className="toast";},3800);}
 function sv(name,el){
   var views=document.querySelectorAll(".view");
-  for(var i=0;i<views.length;i++){views[i].style.display="none";views[i].classList.remove("active");}
-  var view=document.getElementById("view-"+name);
-  if(view){view.style.display="block";view.classList.add("active");}
+  for(var i=0;i<views.length;i++){views[i].classList.remove("active");views[i].classList.add("hidden");}
+  var view=document.getElementById("view-"+name);if(view){view.classList.add("active");view.classList.remove("hidden");}
   var navLinks=document.querySelectorAll(".nav a");
   for(var j=0;j<navLinks.length;j++)navLinks[j].classList.remove("active");
   var target=el||document.querySelector('.nav a[data-view="'+name+'"]');
