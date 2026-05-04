@@ -14,7 +14,9 @@ let robot = {
   online: false, lastSeen: 0, status: {}, detection: {}, people: [], points: [],
   care: { residents: [], reminders: [], alerts: [], logs: [] }, cameraJpegBase64: "",
 };
-const facility = { residents: [], reminders: [], alerts: [], logs: [], roundOrder: [], checkIns: {} };
+const facility = { residents: [], reminders: [], alerts: [], logs: [], roundOrder: [], checkIns: {}, robotAddPin: "" };
+let robotResidentsSynced = false;
+let robotLastSeenAt = 0;
 const scheduledRounds = [];
 const roundHistory = [];
 const commandQueue = [];
@@ -59,6 +61,7 @@ function applySnap(saved) {
   if (Array.isArray(saved.roundOrder)) facility.roundOrder = saved.roundOrder;
   if (saved.checkIns && typeof saved.checkIns === "object") facility.checkIns = saved.checkIns;
   if (typeof saved.brandLogoDataUrl === "string" && saved.brandLogoDataUrl) brandLogoDataUrl = saved.brandLogoDataUrl;
+  if (typeof saved.robotAddPin === "string") facility.robotAddPin = saved.robotAddPin;
 }
 
 async function loadPersistedData() {
@@ -83,7 +86,7 @@ let lastSaved = 0;
 function persistData() {
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(async () => {
-    const snap = { residents: facility.residents, reminders: facility.reminders, alerts: facility.alerts, scheduledRounds, roundHistory, roundOrder: facility.roundOrder, checkIns: facility.checkIns, brandLogoDataUrl };
+    const snap = { residents: facility.residents, reminders: facility.reminders, alerts: facility.alerts, scheduledRounds, roundHistory, roundOrder: facility.roundOrder, checkIns: facility.checkIns, brandLogoDataUrl, robotAddPin: facility.robotAddPin };
     if (mongoDb) {
       try {
         await mongoDb.collection("facility").updateOne({ _id: "state" }, { $set: snap }, { upsert: true });
@@ -630,6 +633,16 @@ select.field{cursor:pointer}
 <p style="font-size:12px;color:#8898b0;margin:6px 0 0">PNG or JPG, max 5 MB. Shown in sidebar and sign-in page.</p>
 </div>
 </div>
+<div class="ch" style="margin-bottom:10px">Robot Security PIN</div>
+<p style="font-size:12px;color:#8898b0;margin:0 0 8px">When set, Nova will require this PIN before staff can add a new resident from the robot screen. Leave blank to disable the PIN gate.</p>
+<div class="fbox" style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid #eef2f8">
+<label class="fl" style="margin-top:0">Add-Resident PIN (digits only)</label>
+<div style="display:flex;gap:8px">
+<input class="field" id="robotPinInput" type="password" placeholder="e.g. 1234 (blank = no PIN)" style="flex:1;letter-spacing:4px">
+<button class="btn p s" onclick="saveRobotPin()">Save PIN</button>
+</div>
+<p id="pinStatus" style="font-size:12px;color:#2ec47a;margin:6px 0 0;display:none">PIN saved and pushed to Nova.</p>
+</div>
 <div class="ch" style="margin-bottom:10px">User Access</div>
 <div class="fbox">
 <label class="fl" style="margin-top:0">Username</label><input class="field" id="newUser" placeholder="Username (3–40 chars)">
@@ -761,6 +774,14 @@ function uploadLogo(){
     });
   };
   reader.readAsDataURL(file);
+}
+function saveRobotPin(){
+  var el=document.getElementById("robotPinInput");var pin=(el&&el.value)||"";
+  post("/api/settings",{robotAddPin:pin}).then(function(out){
+    notice(out.ok?"PIN saved and pushed to Nova.":(out.error||"Could not save PIN"),out.ok);
+    var st=document.getElementById("pinStatus");if(st){st.textContent=out.ok?"PIN "+(pin?"set":"cleared")+". Nova will use it on next command.":"Error saving PIN.";st.style.display="block";st.style.color=out.ok?"#2ec47a":"#ef5350";}
+    if(el)el.value="";
+  });
 }
 function addUser(){
   var u=document.getElementById("newUser");var p=document.getElementById("newPass");var r=document.getElementById("newRole");
@@ -1085,7 +1106,8 @@ function renderAll(s){
   else{if(cb)cb.style.display="none";if(nc)nc.style.display="grid";}
 }
 function refresh(){get("/api/state").then(function(s){if(s&&Object.keys(s).length)renderAll(s);});}
-setInterval(refresh,2000);setInterval(refreshQueue,4000);refresh();refreshQueue();loadUsers();
+setInterval(refresh,2000);setInterval(refreshQueue,4000);refresh();refreshQueue();loadUsers();loadSettings();
+function loadSettings(){get("/api/settings").then(function(out){var el=document.getElementById("robotPinInput");if(el&&out.robotAddPin)el.placeholder="PIN is set (••••)";});}
 var _camFlip=false;
 function updateCamera(src){
   var a=document.getElementById("camera"),b=document.getElementById("camera2");
@@ -1157,6 +1179,9 @@ const server = http.createServer(async (req, res) => {
     robot.online = true; robot.lastSeen = Date.now();
     if (url.pathname === "/robot/state" && req.method === "POST") {
       const body = JSON.parse((await readBody(req)) || "{}");
+      // Detect robot reconnect (gap > 12 s = was offline)
+      if (Date.now() - robotLastSeenAt > 12000) robotResidentsSynced = false;
+      robotLastSeenAt = Date.now();
       robot.status = body.status || robot.status;
       robot.detection = body.detection || robot.detection;
       robot.people = Array.isArray(body.people) ? body.people : robot.people;
@@ -1164,9 +1189,38 @@ const server = http.createServer(async (req, res) => {
       robot.care = body.care || robot.care;
       if (body.cameraJpegBase64) robot.cameraJpegBase64 = body.cameraJpegBase64;
       log("state", { people: robot.people.length, points: robot.points.length });
+      // Auto-push all cloud residents if robot has none (first connect or fresh install)
+      if (!robotResidentsSynced && facility.residents.length > 0) {
+        const robotRes = Array.isArray(robot.care && robot.care.residents) ? robot.care.residents : [];
+        if (robotRes.length === 0) {
+          facility.residents.forEach(function(r) {
+            commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "upsert_resident", params: {
+              id: r.id, name: r.name, room: r.room, mapPoint: r.mapPoint || r.room,
+              notes: [r.medicationNotes, r.mobilityNotes].filter(Boolean).join("; "),
+              checkInPrompt: r.checkInSchedule || ("Hello " + r.name + ". I am checking in. Do you need anything?")
+            }});
+          });
+          if (facility.robotAddPin) {
+            commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "update_settings", params: { robot_add_pin: facility.robotAddPin } });
+          }
+          robotResidentsSynced = true;
+          log("residents_synced_to_robot", { count: facility.residents.length });
+        }
+      }
       return sendJson(res, 200, { ok: true });
     }
     if (url.pathname === "/robot/poll") return sendJson(res, 200, { commands: commandQueue.splice(0, 20) });
+    if (url.pathname === "/robot/residents" && req.method === "GET") {
+      return sendJson(res, 200, { ok: true, residents: facility.residents.map(function(r) {
+        return { id: r.id, name: r.name, room: r.room || "", mapPoint: r.mapPoint || r.room || "",
+          notes: [r.medicationNotes, r.mobilityNotes].filter(Boolean).join("; "),
+          checkInPrompt: r.checkInSchedule || ("Hello " + r.name + ". I am checking in. Do you need anything?") };
+      }) });
+    }
+    if (url.pathname === "/robot/reset-sync" && req.method === "POST") {
+      robotResidentsSynced = false;
+      return sendJson(res, 200, { ok: true });
+    }
     if (url.pathname === "/robot/result" && req.method === "POST") {
       const data = JSON.parse((await readBody(req)) || "{}");
       const p = data.params || {};
@@ -1329,6 +1383,21 @@ const server = http.createServer(async (req, res) => {
     const fname = "nova-backup-" + new Date().toISOString().slice(0, 10) + ".json";
     res.writeHead(200, { "content-type": "application/json; charset=utf-8", "content-disposition": `attachment; filename="${fname}"`, "cache-control": "no-store" });
     return res.end(snap);
+  }
+  if (url.pathname === "/api/settings" && req.method === "GET") {
+    if (!requireAdmin(req, res)) return;
+    return sendJson(res, 200, { ok: true, robotAddPin: facility.robotAddPin || "" });
+  }
+  if (url.pathname === "/api/settings" && req.method === "POST") {
+    const actor = requireRole(req, res, "admin"); if (!actor) return;
+    const body = JSON.parse((await readBody(req)) || "{}");
+    if (typeof body.robotAddPin === "string") {
+      facility.robotAddPin = body.robotAddPin.trim().slice(0, 20);
+      commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "update_settings", params: { robot_add_pin: facility.robotAddPin } });
+      persistData();
+      log("settings_updated", { actor: actor.username, robotAddPin: facility.robotAddPin ? "set" : "cleared" });
+    }
+    return sendJson(res, 200, { ok: true });
   }
   sendJson(res, 404, { ok: false, error: "not found" });
 });
