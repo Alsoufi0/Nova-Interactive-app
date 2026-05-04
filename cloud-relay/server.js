@@ -24,6 +24,7 @@ const events = [];
 const sessions = new Map();
 const users = new Map();
 let brandLogoDataUrl = process.env.BRAND_LOGO_DATA_URL || "";
+const BUILD = "2026-05-04-r1";
 
 function passwordHash(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.pbkdf2Sync(String(password || ""), salt, 120000, 32, "sha256").toString("hex");
@@ -1215,7 +1216,7 @@ window.onerror=function(msg,src,line){notice('JS Error: '+msg+' (line '+line+')'
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
-  if (url.pathname === "/health") return sendJson(res, 200, { ok: true });
+  if (url.pathname === "/health") return sendJson(res, 200, { ok: true, build: BUILD, uptime: Math.floor(process.uptime()) });
 
   if (url.pathname === "/login" && req.method === "GET") {
     if (currentUser(req) || isAdmin(req)) { res.writeHead(302, { location: "/", "cache-control": "no-store" }); return res.end(); }
