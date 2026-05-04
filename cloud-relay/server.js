@@ -14,7 +14,7 @@ let robot = {
   online: false, lastSeen: 0, status: {}, detection: {}, people: [], points: [],
   care: { residents: [], reminders: [], alerts: [], logs: [] }, cameraJpegBase64: "",
 };
-const facility = { residents: [], reminders: [], alerts: [], logs: [], roundOrder: [], checkIns: {}, robotAddPin: "" };
+const facility = { residents: [], reminders: [], alerts: [], logs: [], roundOrder: [], checkIns: {}, robotAddPin: "", plannedVisits: [], visitLog: [] };
 let robotResidentsSynced = false;
 let robotLastSeenAt = 0;
 const scheduledRounds = [];
@@ -63,6 +63,8 @@ function applySnap(saved) {
   if (saved.checkIns && typeof saved.checkIns === "object") facility.checkIns = saved.checkIns;
   if (typeof saved.brandLogoDataUrl === "string" && saved.brandLogoDataUrl) brandLogoDataUrl = saved.brandLogoDataUrl;
   if (typeof saved.robotAddPin === "string") facility.robotAddPin = saved.robotAddPin;
+  if (Array.isArray(saved.plannedVisits)) facility.plannedVisits = saved.plannedVisits;
+  if (Array.isArray(saved.visitLog)) facility.visitLog = saved.visitLog;
 }
 
 async function loadPersistedData() {
@@ -87,7 +89,7 @@ let lastSaved = 0;
 function persistData() {
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(async () => {
-    const snap = { residents: facility.residents, reminders: facility.reminders, alerts: facility.alerts, scheduledRounds, roundHistory, roundOrder: facility.roundOrder, checkIns: facility.checkIns, brandLogoDataUrl, robotAddPin: facility.robotAddPin };
+    const snap = { residents: facility.residents, reminders: facility.reminders, alerts: facility.alerts, scheduledRounds, roundHistory, roundOrder: facility.roundOrder, checkIns: facility.checkIns, brandLogoDataUrl, robotAddPin: facility.robotAddPin, plannedVisits: facility.plannedVisits, visitLog: facility.visitLog.slice(0, 200) };
     if (mongoDb) {
       try {
         await mongoDb.collection("facility").updateOne({ _id: "state" }, { $set: snap }, { upsert: true });
@@ -386,6 +388,7 @@ select.field{cursor:pointer}
 <a data-view="rounds" onclick="sv('rounds',this)"><span class="ni">&#8635;</span>Care Rounds</a>
 <a data-view="residents" onclick="sv('residents',this)"><span class="ni">&#9673;</span>Residents</a>
 <a data-view="alerts" onclick="sv('alerts',this)"><span class="ni">&#9888;</span>Alerts</a>
+<a data-view="visits" onclick="sv('visits',this);loadVisits()"><span class="ni">&#128100;</span>Planned Visits</a>
 <div class="navdiv"></div>
 <a data-view="map" onclick="sv('map',this)"><span class="ni">&#9685;</span>Map &amp; Messaging</a>
 <a data-view="logs" onclick="sv('logs',this)"><span class="ni">&#9776;</span>Operations Log</a>
@@ -585,6 +588,28 @@ select.field{cursor:pointer}
 </div>
 </section>
 
+<section class="view" id="view-visits">
+<div class="g2">
+<div class="card">
+<div class="ch">Planned Visits<button class="btn s" onclick="loadVisits()" style="margin-left:auto">Refresh</button></div>
+<p style="font-size:12px;color:#8898b0;margin:0 0 10px">Visitors listed here will be verified by Nova on arrival. Unrecognised visitors trigger a staff alert.</p>
+<div id="plannedVisitsList"><div class="esbox">Click Refresh or open this section to load visits.</div></div>
+</div>
+<div class="card">
+<div class="ch">Add Planned Visit</div>
+<label class="fl">Visitor Name *</label><input class="field" id="pvVisitorName" placeholder="e.g. John Smith">
+<label class="fl">Resident to Visit</label>
+<select class="field" id="pvResidentSelect"><option value="">Select resident</option></select>
+<label class="fl">Scheduled Date (optional)</label><input class="field" id="pvDate" type="date">
+<label class="fl">Notes</label><input class="field" id="pvNotes" placeholder="Reason for visit (optional)">
+<button class="btn p" style="margin-top:10px;width:100%;justify-content:center" onclick="addPlannedVisit()">Add Planned Visit</button>
+<div style="margin-top:20px;padding-top:16px;border-top:1px solid #eef2f8">
+<div class="ch" style="margin-bottom:10px">Visit Log (from Nova)</div>
+<div id="visitLogList"><div class="esbox muted">No visits recorded yet.</div></div>
+</div>
+</div>
+</div>
+</section>
 
 <section class="view" id="view-map">
 <div class="g2">
@@ -661,7 +686,7 @@ select.field{cursor:pointer}
 <div class="toast" id="toast"></div>
 <script>
 var columns=${JSON.stringify(residentColumns)};
-var T={command:["Command Center","Live data from Nova and your facility registry."],robots:["Robot Feeds","Telemetry and detection feed from Nova."],rounds:["Care Rounds","Build rounds, set schedules, and track check-ins."],residents:["Residents","Manage the resident registry."],alerts:["Alerts","Create urgent alerts and monitor facility events."],map:["Map & Messaging","Live map points from Nova."],logs:["Operations Log","Commands, state updates and facility actions."],settings:["Settings","System status, brand, users and backup tools."]};
+var T={command:["Command Center","Live data from Nova and your facility registry."],robots:["Robot Feeds","Telemetry and detection feed from Nova."],rounds:["Care Rounds","Build rounds, set schedules, and track check-ins."],residents:["Residents","Manage the resident registry."],alerts:["Alerts","Create urgent alerts and monitor facility events."],visits:["Planned Visits","Manage planned visits and view the visitor log."],map:["Map & Messaging","Live map points from Nova."],logs:["Operations Log","Commands, state updates and facility actions."],settings:["Settings","System status, brand, users and backup tools."]};
 function get(p){return fetch(p,{cache:"no-store"}).then(function(r){return r.ok?r.json():{};}).catch(function(){return{};})}
 function post(p,b){return fetch(p,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b)}).then(function(r){return r.json();}).catch(function(){return{ok:false,error:"Network error"};})}
 function cmd(action,params){params=params||{};notice("Sending...",true);post("/api/command",{action:action,params:params}).then(function(out){notice(out.ok?"Sent: "+action:"Error: "+(out.error||"failed"),out.ok);refresh();});}
@@ -882,6 +907,38 @@ function selectAllForRound(v){if(v===undefined)v=true;var cbs=document.querySele
 function updateRoundSelCount(){var cbs=document.querySelectorAll(".round-res-cb");var total=cbs.length,checked=0;for(var i=0;i<cbs.length;i++){if(cbs[i].checked)checked++;}var el=document.getElementById("roundSelCount");if(el)el.textContent=total?"("+checked+" of "+total+")":"";}
 function goRounds(){var a=document.querySelector('.nav a[data-view="rounds"]');sv("rounds",a);}
 function goAlerts(){var a=document.querySelector('.nav a[data-view="alerts"]');sv("alerts",a);}
+function loadVisits(){
+  get("/api/planned-visits").then(function(out){
+    var el=document.getElementById("plannedVisitsList");
+    var ll=document.getElementById("visitLogList");
+    if(!el)return;
+    var pv=out.plannedVisits||[];
+    if(!pv.length){el.innerHTML='<div class="esbox">No planned visits yet. Add one using the form.</div>';}
+    else{el.innerHTML=pv.map(function(v){return rRow("blue",esc(v.visitorName)+" → "+esc(v.residentName)+(v.room?" ("+esc(v.room)+")":"")+(v.scheduledDate?" · "+esc(v.scheduledDate):""),v.notes||"","<button class='btn s d' onclick='deletePlannedVisit(\""+esc(v.id)+"\")'>Remove</button>");}).join("");}
+    var vl=out.visitLog||[];
+    if(ll){if(!vl.length){ll.innerHTML='<div class="esbox muted">No visits recorded yet.</div>';}
+    else{ll.innerHTML=vl.map(function(v){var badge=v.isPlanned?'<span class="pill ok">Planned</span>':'<span class="pill low">Unplanned</span>';return rRow("blue",esc(v.visitorName)+(v.residentName?" → "+esc(v.residentName):"")+(v.room?" ("+esc(v.room)+")":""),new Date(v.loggedAt).toLocaleString()+" "+badge);}).join("");}}
+  });
+}
+function addPlannedVisit(){
+  var vn=document.getElementById("pvVisitorName");var vv=vn&&vn.value.trim();
+  if(!vv)return notice("Visitor name is required.",false);
+  var rs=document.getElementById("pvResidentSelect");var rid=rs&&rs.value;
+  var ro=rs&&rs.options&&rs.selectedIndex>=0&&rs.options[rs.selectedIndex];
+  var rname=(ro&&ro.text)?ro.text.split(" — ")[0]:"";
+  var rroom=(ro&&ro.dataset)?ro.dataset.room||"":"";
+  var dt=document.getElementById("pvDate");var nt=document.getElementById("pvNotes");
+  post("/api/planned-visits",{visitorName:vv,residentId:rid||"",residentName:rname,room:rroom,scheduledDate:(dt&&dt.value)||"",notes:(nt&&nt.value)||""}).then(function(out){
+    notice(out.ok?"Planned visit added":"Error: "+(out.error||"Could not save"),out.ok);
+    if(out.ok){if(vn)vn.value="";if(dt)dt.value="";if(nt)nt.value="";if(rs)rs.selectedIndex=0;loadVisits();}
+  });
+}
+function deletePlannedVisit(id){
+  if(!confirm("Remove this planned visit?"))return;
+  fetch("/api/planned-visits/"+encodeURIComponent(id),{method:"DELETE"}).then(function(r){return r.json();}).then(function(out){
+    notice(out.ok?"Removed":(out.error||"Could not remove"),out.ok);loadVisits();
+  });
+}
 function _cmdResId(){var el=document.getElementById("cmdResidentSelect");return el&&el.value||"";}
 function _cmdPt(){var el=document.getElementById("cmdPointSelect");return el&&el.value||"";}
 function cmdCheckIn(){var rid=_cmdResId();if(!rid)return notice("Select a resident in the Quick Dispatch panel first.",false);checkInResident(rid);}
@@ -1093,6 +1150,7 @@ function renderAll(s){
   if(crs)crs.innerHTML=res.length?res.map(function(r){return'<option value="'+esc(r.id)+'">'+esc(r.name)+" — Room "+esc(r.room)+"</option>";}).join(""):"<option value='' disabled>No residents yet — add in Residents section</option>";
   if(crs&&crsV){crs.value=crsV;}
   var cri=gi("cmdResInfo");if(cri){var crId=crs&&crs.value;var cr=byId(crId);var lci2=cr&&checkIns[cr.id];cri.textContent=cr?("Room "+cr.room+(cr.careLevel?" · "+cr.careLevel:"")+(lci2?" · Last seen "+timeAgo(lci2):" · No check-in on record")):(res.length?"Select a resident above.":"");}
+  var pvrs=gi("pvResidentSelect");if(pvrs)pvrs.innerHTML='<option value="">Select resident</option>'+(res.length?res.map(function(r){return'<option value="'+esc(r.id)+'" data-room="'+esc(r.room||"")+'">'+esc(r.name)+(r.room?" — "+esc(r.room):"")+"</option>";}).join(""):"");
   var cps=gi("cmdPointSelect");var cpsV=cps&&cps.value;
   if(cps)cps.innerHTML=pts.length?pts.map(function(p){return'<option value="'+esc(p.name)+'">'+esc(p.name)+"</option>";}).join(""):"<option value='' disabled>Waiting for Nova to connect...</option>";
   if(cps&&cpsV){cps.value=cpsV;}
@@ -1224,9 +1282,15 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true });
     }
     if (url.pathname === "/robot/planned-visits" && req.method === "GET") {
-      return sendJson(res, 200, { ok: true, plannedVisits: [] });
+      return sendJson(res, 200, { ok: true, plannedVisits: facility.plannedVisits });
     }
     if (url.pathname === "/robot/visit-log" && req.method === "POST") {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      const entry = { id: crypto.randomUUID(), visitorName: String(body.visitorName || "Unknown").slice(0, 120), residentName: String(body.residentName || "").slice(0, 120), room: String(body.room || "").slice(0, 80), plannedVisitId: String(body.plannedVisitId || ""), isPlanned: !!body.isPlanned, loggedAt: typeof body.loggedAt === "number" ? body.loggedAt : Date.now() };
+      facility.visitLog.unshift(entry);
+      if (facility.visitLog.length > 200) facility.visitLog.pop();
+      persistData();
+      log("visit", entry);
       return sendJson(res, 200, { ok: true });
     }
     if (url.pathname === "/robot/result" && req.method === "POST") {
@@ -1345,6 +1409,30 @@ const server = http.createServer(async (req, res) => {
     commandQueue.push(command);
     facility.logs.push({ createdAt: Date.now(), title: "Command queued", detail: `${command.action} ${JSON.stringify(command.params)}` });
     log("command", command); return sendJson(res, 200, { ok: true, command });
+  }
+  if (url.pathname === "/api/planned-visits" && req.method === "GET") {
+    return sendJson(res, 200, { ok: true, plannedVisits: facility.plannedVisits, visitLog: facility.visitLog.slice(0, 50) });
+  }
+  if (url.pathname === "/api/planned-visits" && req.method === "POST") {
+    if (!requireRole(req, res, "operator")) return;
+    const body = JSON.parse((await readBody(req)) || "{}");
+    const visitorName = String(body.visitorName || "").trim();
+    if (!visitorName) return sendJson(res, 400, { ok: false, error: "visitorName is required" });
+    const entry = { id: crypto.randomUUID(), visitorName: visitorName.slice(0, 120), residentId: String(body.residentId || ""), residentName: String(body.residentName || "").slice(0, 120), room: String(body.room || "").slice(0, 80), scheduledDate: String(body.scheduledDate || ""), notes: String(body.notes || "").slice(0, 500), createdAt: Date.now() };
+    facility.plannedVisits.push(entry);
+    persistData();
+    log("planned_visit_added", { visitorName, residentName: entry.residentName });
+    return sendJson(res, 200, { ok: true, plannedVisit: entry });
+  }
+  const pvDeleteMatch = url.pathname.match(/^\/api\/planned-visits\/([^/]+)$/);
+  if (pvDeleteMatch && req.method === "DELETE") {
+    if (!requireRole(req, res, "operator")) return;
+    const id = decodeURIComponent(pvDeleteMatch[1]);
+    const idx = facility.plannedVisits.findIndex(v => v.id === id);
+    if (idx < 0) return sendJson(res, 404, { ok: false, error: "planned visit not found" });
+    facility.plannedVisits.splice(idx, 1);
+    persistData();
+    return sendJson(res, 200, { ok: true });
   }
   if (url.pathname === "/api/schedules" && req.method === "GET") {
     return sendJson(res, 200, { ok: true, schedules: scheduledRounds });
