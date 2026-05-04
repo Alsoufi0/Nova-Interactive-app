@@ -360,7 +360,7 @@ select.field{cursor:pointer}
 @keyframes fadeInUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
 @keyframes rippleAnim{to{transform:scale(5);opacity:0}}
 @keyframes livePulse{0%,100%{box-shadow:0 0 0 0 rgba(229,62,62,.55)}70%{box-shadow:0 0 0 9px rgba(229,62,62,0)}}
-@keyframes slideIn{from{opacity:0;transform:translateY(22px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(22px) scale(.97)}to{opacity:1;transform:none}}
 .view.active{animation:fadeInUp .26s cubic-bezier(.22,.68,0,1) both}
 .tile{position:relative;overflow:hidden}.tile:active{transform:translateY(-2px) scale(.97)}
 .ripple-el{position:absolute;border-radius:50%;background:rgba(255,255,255,.28);transform:scale(0);animation:rippleAnim .52s linear;pointer-events:none}
@@ -685,7 +685,7 @@ select.field{cursor:pointer}
 <div class="toast" id="toast"></div>
 <script>
 var columns=${JSON.stringify(residentColumns)};
-var T={command:["Command Center","Live data from Nova and your facility registry."],robots:["Robot Feeds","Telemetry and detection feed from Nova."],rounds:["Care Rounds","Build rounds, set schedules, and track check-ins."],residents:["Residents","Manage the resident registry."],alerts:["Alerts","Create urgent alerts and monitor facility events."],map:["Map & Messaging","Live map points from Nova."],logs:["Operations Log","Commands, state updates and facility actions."],settings:["Settings","System status, brand, users and backup tools."]};
+var T={command:["Command Center","Live data from Nova and your facility registry."],robots:["Robot Feeds","Telemetry and detection feed from Nova."],rounds:["Care Rounds","Build rounds, set schedules, and track check-ins."],residents:["Residents","Manage the resident registry."],alerts:["Alerts","Create urgent alerts and monitor facility events."],visits:["Planned Visits","Manage planned visits and view the visitor log."],map:["Map & Messaging","Live map points from Nova."],logs:["Operations Log","Commands, state updates and facility actions."],settings:["Settings","System status, brand, users and backup tools."]};
 function get(p){return fetch(p,{cache:"no-store"}).then(function(r){return r.ok?r.json():{};}).catch(function(){return{};})}
 function post(p,b){return fetch(p,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b)}).then(function(r){return r.json();}).catch(function(){return{ok:false,error:"Network error"};})}
 function cmd(action,params){params=params||{};notice("Sending...",true);post("/api/command",{action:action,params:params}).then(function(out){notice(out.ok?"Sent: "+action:"Error: "+(out.error||"failed"),out.ok);refresh();});}
@@ -693,8 +693,9 @@ function esc(v){var map={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#3
 function notice(t,ok){if(ok===undefined)ok=true;var el=document.getElementById("toast");if(!el)return;el.innerHTML=(ok?'<span style="color:#2ec47a;font-size:15px;flex-shrink:0">&#10003;</span>':'<span style="color:#ef5350;font-size:15px;flex-shrink:0">&#10005;</span>')+'<span>'+esc(String(t||""))+'</span>';el.className="toast show "+(ok?"t-ok":"t-err");clearTimeout(notice._t);notice._t=setTimeout(function(){el.className="toast";},3800);}
 function sv(name,el){
   var views=document.querySelectorAll(".view");
-  for(var i=0;i<views.length;i++){views[i].classList.remove("active");views[i].classList.add("hidden");}
-  var view=document.getElementById("view-"+name);if(view){view.classList.add("active");view.classList.remove("hidden");}
+  for(var i=0;i<views.length;i++){views[i].style.display="none";views[i].classList.remove("active");}
+  var view=document.getElementById("view-"+name);
+  if(view){view.style.display="block";view.classList.add("active");}
   var navLinks=document.querySelectorAll(".nav a");
   for(var j=0;j<navLinks.length;j++)navLinks[j].classList.remove("active");
   var target=el||document.querySelector('.nav a[data-view="'+name+'"]');
@@ -1169,7 +1170,7 @@ function renderAll(s){
 }
 function refresh(){get("/api/state").then(function(s){if(s&&Object.keys(s).length)renderAll(s);});}
 setInterval(refresh,2000);setInterval(refreshQueue,4000);refresh();refreshQueue();loadUsers();loadSettings();
-document.querySelector('.nav a[data-view="visits"]').addEventListener("click",function(){setTimeout(loadVisits,100);});
+var _visNav=document.querySelector('.nav a[data-view="visits"]');if(_visNav)_visNav.addEventListener("click",function(){setTimeout(loadVisits,100);});
 function loadSettings(){get("/api/settings").then(function(out){var el=document.getElementById("robotPinInput");if(el&&out.robotAddPin)el.placeholder="PIN is set (••••)";});}
 var _camFlip=false;
 function updateCamera(src){
