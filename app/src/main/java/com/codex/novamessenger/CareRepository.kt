@@ -127,7 +127,9 @@ class CareRepository(context: Context) {
     }
 
     fun resident(id: String?): CareResident? =
-        residents().firstOrNull { it.id == id } ?: residents().firstOrNull()
+        id?.takeIf { it.isNotBlank() }?.let { requested ->
+            residents().firstOrNull { it.id == requested }
+        }
 
     fun createAlert(priority: String, room: String, message: String): CareAlert {
         val alert = CareAlert(

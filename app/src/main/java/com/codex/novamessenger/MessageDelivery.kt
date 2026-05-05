@@ -1,5 +1,10 @@
 package com.codex.novamessenger
 
+import com.codex.novamessenger.Danger
+import com.codex.novamessenger.Good
+import com.codex.novamessenger.Muted
+import com.codex.novamessenger.Neutral
+import com.codex.novamessenger.Text
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MessageDelivery(private val activity: MainActivity) {
@@ -138,14 +143,24 @@ class MessageDelivery(private val activity: MainActivity) {
         val played = AtomicBoolean(false)
         val result = activity.robot.startNavigation(verifiedDestination) { status ->
             activity.setStatus(status)
-            val lower = status.lowercase()
             val arrived = activity.careWorkflow.isArrivalStatus(status)
-            val failed = lower.contains("error") || lower.contains("fail")
-            if ((arrived || failed) && played.compareAndSet(false, true)) {
+            val failed = activity.careWorkflow.isNavigationFailureStatus(status)
+            if (arrived && played.compareAndSet(false, true)) {
                 activity.runOnUiThread { playDeliveredMessage(message) }
+            } else if (failed && played.compareAndSet(false, true)) {
+                activity.runOnUiThread {
+                    activity.setTask("Message failed", "Navigation failed", verifiedDestination, 0)
+                    activity.setStatus("Message delivery failed before arrival: $status")
+                    activity.speakReply("I could not safely reach $verifiedDestination. The message was not delivered.")
+                    activity.completeCloudWorkflow("message", "Message delivery failed before arrival at $verifiedDestination: $status", ok = false)
+                }
             }
         }
-        if (!result.ok && played.compareAndSet(false, true)) playDeliveredMessage(message)
+        if (!result.ok && played.compareAndSet(false, true)) {
+            activity.setTask("Message failed", "Navigation unavailable", verifiedDestination, 0)
+            activity.setStatus("Message delivery failed: ${result.message}")
+            activity.completeCloudWorkflow("message", "Message delivery failed: ${result.message}", ok = false)
+        }
     }
 
     fun refreshMessages() {

@@ -64,15 +64,27 @@ class CareWorkflow(private val activity: MainActivity) {
                 if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
             }
         }
-        val result = activity.robot.startNavigation(dest) { status ->
-            activity.setStatus(status)
-            val lower = status.lowercase()
-            when {
-                isArrivalStatus(status) -> onArrival()
-                lower.contains("error") || lower.contains("fail") -> onArrival()
+        fun onNavigationFailed(reason: String) {
+            if (!handled.compareAndSet(false, true)) return
+            activity.runOnUiThread {
+                activity.activeRoundIds = emptyList()
+                activity.activeRoundIndex = -1
+                activity.setTask("Check-in failed", "Navigation failed", resident.room, 0)
+                activity.setStatus("Could not reach ${resident.name}: $reason")
+                activity.speakReply("I could not safely reach ${resident.name}. Staff has been notified.")
+                activity.careRepo.log("check_in", "Check-in navigation failed", reason, resident.id, dest)
+                activity.completeCloudWorkflow("resident_checkin", "Check-in failed before arrival for ${resident.name}: $reason", resident.id, ok = false)
+                if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
             }
         }
-        if (!result.ok) onArrival()
+        val result = activity.robot.startNavigation(dest) { status ->
+            activity.setStatus(status)
+            when {
+                isArrivalStatus(status) -> onArrival()
+                isNavigationFailureStatus(status) -> onNavigationFailed(status)
+            }
+        }
+        if (!result.ok) onNavigationFailed(result.message)
         activity.runOnUiThread { if (activity.currentPage == "care") activity.setContentView(activity.buildUi()) }
     }
 
@@ -147,15 +159,25 @@ class CareWorkflow(private val activity: MainActivity) {
                 if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
             }
         }
-        val result = activity.robot.startNavigation(dest) { status ->
-            activity.setStatus(status)
-            val lower = status.lowercase()
-            when {
-                isArrivalStatus(status) -> onArrival()
-                lower.contains("error") || lower.contains("fail") -> onArrival()
+        fun onNavigationFailed(reason: String) {
+            if (!handled.compareAndSet(false, true)) return
+            activity.runOnUiThread {
+                activity.setTask("Check-in failed", "Navigation failed", displayRoom, 0)
+                activity.setStatus("Could not reach $displayName: $reason")
+                activity.speakReply("I could not safely reach $displayName. Staff has been notified.")
+                activity.careRepo.log("check_in", "Cloud check-in navigation failed", reason, residentId.ifBlank { null }, dest)
+                activity.completeCloudWorkflow(cloudAction, "${if (cloudAction == "med_reminder") "Medication reminder" else "Check-in"} failed before arrival for $displayName: $reason", residentId, ok = false)
+                if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
             }
         }
-        if (!result.ok) onArrival()
+        val result = activity.robot.startNavigation(dest) { status ->
+            activity.setStatus(status)
+            when {
+                isArrivalStatus(status) -> onArrival()
+                isNavigationFailureStatus(status) -> onNavigationFailed(status)
+            }
+        }
+        if (!result.ok) onNavigationFailed(result.message)
         activity.runOnUiThread { if (activity.currentPage == "care") activity.setContentView(activity.buildUi()) }
     }
 
@@ -176,7 +198,12 @@ class CareWorkflow(private val activity: MainActivity) {
         val reminder = activity.careRepo.reminders().firstOrNull { it.id == reminderId }
             ?: return activity.setStatus("Reminder not found.")
         val resident = activity.careRepo.resident(reminder.residentId)
-        val dest = resolveMapPoint(resident?.mapPoint ?: activity.destination())
+        val dest = resolveVerifiedMapPoint(resident?.mapPoint ?: activity.destination()) ?: return activity.runOnUiThread {
+            activity.setTask("Reminder destination needed", "Needs setup", resident?.room ?: activity.destination(), 0)
+            activity.setStatus("No verified map point for reminder destination.")
+            activity.speakReply("I do not have a verified saved map point for this reminder.")
+            activity.completeCloudWorkflow("med_reminder", "Blocked: no verified map point for reminder.", reminder.residentId, ok = false)
+        }
         activity.runOnUiThread { activity.setDestinationText(dest) }
         activity.setTask("Medication reminder", "Navigating", "Speak reminder", 45)
         activity.careRepo.log("reminder", reminder.title, "Going to ${resident?.name ?: "resident"} for ${reminder.timeLabel}.", reminder.residentId, dest)
@@ -196,15 +223,25 @@ class CareWorkflow(private val activity: MainActivity) {
                 if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
             }
         }
-        val result = activity.robot.startNavigation(dest) { status ->
-            activity.setStatus(status)
-            val lower = status.lowercase()
-            when {
-                isArrivalStatus(status) -> onArrival()
-                lower.contains("error") || lower.contains("fail") -> onArrival()
+        fun onNavigationFailed(reason: String) {
+            if (!handled.compareAndSet(false, true)) return
+            activity.runOnUiThread {
+                activity.setTask("Reminder failed", "Navigation failed", resident?.room ?: dest, 0)
+                activity.setStatus("Could not reach reminder destination: $reason")
+                activity.speakReply("I could not safely reach the reminder destination. Staff has been notified.")
+                activity.careRepo.log("reminder", "Reminder navigation failed", reason, reminder.residentId, dest)
+                activity.completeCloudWorkflow("med_reminder", "Medication reminder failed before arrival: $reason", reminder.residentId, ok = false)
+                if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
             }
         }
-        if (!result.ok) onArrival()
+        val result = activity.robot.startNavigation(dest) { status ->
+            activity.setStatus(status)
+            when {
+                isArrivalStatus(status) -> onArrival()
+                isNavigationFailureStatus(status) -> onNavigationFailed(status)
+            }
+        }
+        if (!result.ok) onNavigationFailed(result.message)
         activity.runOnUiThread { if (activity.currentPage == "care") activity.setContentView(activity.buildUi()) }
     }
 
@@ -227,7 +264,16 @@ class CareWorkflow(private val activity: MainActivity) {
         }
 
         if (room.isNotBlank()) {
-            val dest = resolveMapPoint(resolvedRoom)
+            val dest = resolveVerifiedMapPoint(resolvedRoom)
+            if (dest == null) {
+                activity.runOnUiThread {
+                    activity.setTask("Staff alert", "Speaking locally", resolvedRoom, 60)
+                    activity.speakReply(speakMessage)
+                    activity.completeCloudWorkflow("staff_alert", "Staff alert spoken locally; no verified map point for $resolvedRoom.", ok = false)
+                    scheduleAlertReturn()
+                }
+                return
+            }
             activity.runOnUiThread { activity.setDestinationText(dest) }
             activity.follow.stop()
             activity.setTask("Staff alert", "Navigating", "Speak alert at $resolvedRoom", 55)
@@ -244,15 +290,24 @@ class CareWorkflow(private val activity: MainActivity) {
             }
             val result = activity.robot.startNavigation(dest) { status ->
                 activity.setStatus(status)
-                val lower = status.lowercase()
                 when {
                     isArrivalStatus(status) -> onArrival()
-                    lower.contains("error") || lower.contains("fail") -> onArrival()
+                    isNavigationFailureStatus(status) -> {
+                        if (!handled.compareAndSet(false, true)) return@startNavigation
+                        activity.runOnUiThread {
+                            activity.setTask("Staff alert failed", "Navigation failed", resolvedRoom, 0)
+                            activity.speakReply(speakMessage)
+                            activity.completeCloudWorkflow("staff_alert", "Staff alert navigation failed before arrival at $resolvedRoom.", ok = false)
+                            scheduleAlertReturn()
+                        }
+                    }
                 }
             }
             if (!result.ok) {
                 activity.runOnUiThread {
+                    activity.setTask("Staff alert failed", "Navigation unavailable", resolvedRoom, 0)
                     activity.speakReply(speakMessage)
+                    activity.completeCloudWorkflow("staff_alert", "Staff alert navigation failed: ${result.message}", ok = false)
                     scheduleAlertReturn()
                 }
             }
@@ -353,5 +408,10 @@ class CareWorkflow(private val activity: MainActivity) {
         return listOf("arrive", "complete", "success", "finish", "in range", "in_destination", "到达", "完成").any { lower.contains(it) } ||
             Regex("""navigation result\s+(102|104)\b""").containsMatchIn(lower) ||
             Regex("""navigation result\s+1\s+true""").containsMatchIn(lower)
+    }
+
+    fun isNavigationFailureStatus(status: String): Boolean {
+        val lower = status.lowercase()
+        return listOf("error", "fail", "cancel", "blocked", "obstacle", "timeout", "unreachable").any { lower.contains(it) }
     }
 }
