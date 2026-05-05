@@ -14,19 +14,17 @@ let robot = {
   online: false, lastSeen: 0, status: {}, detection: {}, people: [], points: [],
   care: { residents: [], reminders: [], alerts: [], logs: [] }, cameraJpegBase64: "",
 };
-const facility = { residents: [], reminders: [], alerts: [], dismissedAlertIds: [], logs: [], roundOrder: [], checkIns: {}, robotAddPin: "", plannedVisits: [], visitLog: [] };
+const facility = { residents: [], reminders: [], alerts: [], logs: [], roundOrder: [], checkIns: {}, robotAddPin: "", plannedVisits: [], visitLog: [] };
 let robotResidentsSynced = false;
 let robotLastSeenAt = 0;
 const scheduledRounds = [];
 const roundHistory = [];
 const commandQueue = [];
-const commandResults = [];
-const recentCommands = new Map();
 const events = [];
 const sessions = new Map();
 const users = new Map();
 let brandLogoDataUrl = process.env.BRAND_LOGO_DATA_URL || "";
-const BUILD = "2026-05-04-r1";
+const BUILD = "2026-05-04-r2";
 
 function passwordHash(password, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.pbkdf2Sync(String(password || ""), salt, 120000, 32, "sha256").toString("hex");
@@ -59,7 +57,6 @@ function applySnap(saved) {
   if (Array.isArray(saved.residents)) facility.residents = saved.residents;
   if (Array.isArray(saved.reminders)) facility.reminders = saved.reminders;
   if (Array.isArray(saved.alerts)) facility.alerts = saved.alerts;
-  if (Array.isArray(saved.dismissedAlertIds)) facility.dismissedAlertIds = saved.dismissedAlertIds;
   if (Array.isArray(saved.scheduledRounds)) saved.scheduledRounds.forEach(s => scheduledRounds.push(s));
   if (Array.isArray(saved.roundHistory)) saved.roundHistory.forEach(h => roundHistory.push(h));
   if (Array.isArray(saved.roundOrder)) facility.roundOrder = saved.roundOrder;
@@ -92,7 +89,7 @@ let lastSaved = 0;
 function persistData() {
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(async () => {
-    const snap = { residents: facility.residents, reminders: facility.reminders, alerts: facility.alerts, dismissedAlertIds: facility.dismissedAlertIds.slice(-500), scheduledRounds, roundHistory, roundOrder: facility.roundOrder, checkIns: facility.checkIns, brandLogoDataUrl, robotAddPin: facility.robotAddPin, plannedVisits: facility.plannedVisits, visitLog: facility.visitLog.slice(0, 200) };
+    const snap = { residents: facility.residents, reminders: facility.reminders, alerts: facility.alerts, scheduledRounds, roundHistory, roundOrder: facility.roundOrder, checkIns: facility.checkIns, brandLogoDataUrl, robotAddPin: facility.robotAddPin, plannedVisits: facility.plannedVisits, visitLog: facility.visitLog.slice(0, 200) };
     if (mongoDb) {
       try {
         await mongoDb.collection("facility").updateOne({ _id: "state" }, { $set: snap }, { upsert: true });
@@ -121,17 +118,6 @@ function readBody(req) {
     req.on("data", (c) => chunks.push(c));
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
   });
-}
-async function readJson(req, fallback = {}) {
-  const raw = await readBody(req);
-  if (!cleanText(raw)) return fallback;
-  try { return JSON.parse(raw); }
-  catch (e) { return { ...fallback, __jsonError: e.message }; }
-}
-function rejectBadJson(body, res) {
-  if (!body || !body.__jsonError) return false;
-  sendJson(res, 400, { ok: false, error: "invalid json" });
-  return true;
 }
 function safeEqual(a, b) {
   const l = Buffer.from(a || ""), r = Buffer.from(b || "");
@@ -171,23 +157,9 @@ function requireRole(req, res, role = "admin") {
 }
 function log(type, detail = {}) { events.push({ at: Date.now(), type, data: detail }); while (events.length > 200) events.shift(); }
 function cleanText(v) { return String(v || "").trim(); }
-function rememberCommand(command) {
-  if (!command || !command.id) return command;
-  recentCommands.set(command.id, command);
-  if (recentCommands.size > 300) recentCommands.delete(recentCommands.keys().next().value);
-  return command;
-}
 function stableId(prefix, value) {
   const base = cleanText(value) || crypto.randomUUID();
   return `${prefix}-${crypto.createHash("sha1").update(base).digest("hex").slice(0, 10)}`;
-}
-function visitorIdHash(value) {
-  const clean = cleanText(value).toLowerCase().replace(/\s+/g, "");
-  if (!clean) return "";
-  return crypto.createHmac("sha256", SESSION_SECRET).update(clean).digest("hex");
-}
-function visitorIdLast4(value) {
-  return cleanText(value).replace(/\s+/g, "").slice(-4);
 }
 function parseCsv(text) {
   const rows = []; let row = [], cell = "", quoted = false;
@@ -223,116 +195,12 @@ function toResident(input) {
 }
 function mergedCare() {
   const rc = robot.care || {};
-  const dismissed = new Set((facility.dismissedAlertIds || []).map(String));
-  const alerts = [...facility.alerts, ...(Array.isArray(rc.alerts) ? rc.alerts : [])]
-    .filter(a => !dismissed.has(String(a && a.id)));
   return {
     residents: facility.residents,
     reminders: [...facility.reminders, ...(Array.isArray(rc.reminders) ? rc.reminders : [])],
-    alerts,
+    alerts: [...facility.alerts, ...(Array.isArray(rc.alerts) ? rc.alerts : [])],
     logs: [...facility.logs, ...(Array.isArray(rc.logs) ? rc.logs : [])],
   };
-}
-
-const AI_ALLOWED_ACTIONS = new Set([
-  "send_message", "guide", "staff_alert", "resident_checkin", "med_reminder",
-  "start_rounds", "follow_start", "follow_stop", "camera_start", "security_start",
-  "patient_lookup", "patient_visit", "stop", "capabilities", "unknown"
-]);
-
-function safeAiString(value, max = 500) {
-  return cleanText(value).slice(0, max);
-}
-function extractJsonObject(text) {
-  const raw = String(text || "").trim();
-  if (!raw) return null;
-  try { return JSON.parse(raw); } catch (_) {}
-  const start = raw.indexOf("{"), end = raw.lastIndexOf("}");
-  if (start >= 0 && end > start) {
-    try { return JSON.parse(raw.slice(start, end + 1)); } catch (_) {}
-  }
-  return null;
-}
-function normalizeAiIntent(parsed) {
-  const action = safeAiString(parsed && parsed.action, 40).toLowerCase();
-  if (!AI_ALLOWED_ACTIONS.has(action)) {
-    return { ok: true, action: "unknown", confidence: 0, reply: "Please ask me again in a simpler way." };
-  }
-  const priority = safeAiString(parsed && parsed.priority, 20).toLowerCase();
-  return {
-    ok: true,
-    action,
-    confidence: Math.max(0, Math.min(1, Number(parsed && parsed.confidence || 0))),
-    destination: safeAiString(parsed && parsed.destination, 120),
-    residentId: safeAiString(parsed && parsed.residentId, 120),
-    residentName: safeAiString(parsed && parsed.residentName, 120),
-    message: safeAiString(parsed && parsed.message, 500),
-    priority: ["normal", "urgent"].includes(priority) ? priority : "normal",
-    reply: safeAiString(parsed && parsed.reply, 500),
-    patientAccess: !!(parsed && parsed.patientAccess),
-  };
-}
-function buildAiPrompt(body) {
-  const mapPoints = Array.isArray(body.mapPoints) ? body.mapPoints.slice(0, 80).map(p => ({
-    name: safeAiString(p && p.name, 120),
-    status: Number(p && p.status || 0),
-  })) : [];
-  const residents = Array.isArray(body.residents) ? body.residents.slice(0, 120).map(r => ({
-    id: safeAiString(r && r.id, 80),
-    name: safeAiString(r && r.name, 120),
-    room: safeAiString(r && r.room, 120),
-    mapPoint: safeAiString(r && r.mapPoint, 120),
-  })) : [];
-  return [
-    {
-      role: "system",
-      content: [
-        "You classify spoken requests for Nova, a healthcare and elder-care concierge robot.",
-        "Return only compact JSON. Do not include markdown.",
-        "Allowed actions: send_message, guide, staff_alert, resident_checkin, med_reminder, start_rounds, follow_start, follow_stop, camera_start, security_start, patient_lookup, patient_visit, stop, capabilities, unknown.",
-        "Use known public map points and resident names only. Do not invent destinations or resident IDs.",
-        "For patient/resident privacy: if a visitor asks whether an exact resident name is here, use patient_lookup and only identify residentId/residentName. Never output room or destination for a patient.",
-        "If a visitor asks to see, visit, find, or be guided to a resident/patient by name, use patient_visit and only identify residentId/residentName. Do not output room/destination.",
-        "Only care staff commands such as resident check-in, rounds, or medication reminders may use resident_checkin or med_reminder.",
-        "If destination or resident is unclear, action unknown and reply with one short clarifying question.",
-        "For send_message, extract the message content if the user already said it; otherwise leave message empty so Nova can record it.",
-        "For staff_alert, use priority urgent for emergency, fall, pain, breathing, or immediate danger.",
-        "JSON shape: {\"action\":\"...\",\"confidence\":0.0,\"destination\":\"\",\"residentId\":\"\",\"residentName\":\"\",\"message\":\"\",\"priority\":\"normal|urgent\",\"reply\":\"\",\"patientAccess\":false}"
-      ].join(" ")
-    },
-    {
-      role: "user",
-      content: JSON.stringify({
-        phrase: safeAiString(body.phrase, 500),
-        currentDestination: safeAiString(body.currentDestination, 120),
-        mapPoints,
-        residents,
-      })
-    }
-  ];
-}
-async function classifyIntentWithAi(body) {
-  const key = process.env.OPENAI_API_KEY || process.env.AI_API_KEY || "";
-  if (!key) return { ok: false, fallback: true, error: "AI model is not configured" };
-  const endpoint = process.env.AI_BASE_URL || "https://api.openai.com/v1/chat/completions";
-  const model = process.env.AI_MODEL || "gpt-4o-mini";
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model, temperature: 0, messages: buildAiPrompt(body) }),
-  });
-  const text = await response.text();
-  if (!response.ok) return { ok: false, fallback: true, error: `AI request failed: ${response.status}` };
-  let content = "";
-  try {
-    const data = JSON.parse(text);
-    content = data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : "";
-  } catch (_) {
-    content = text;
-  }
-  const parsed = extractJsonObject(content);
-  if (!parsed) return { ok: false, fallback: true, error: "AI response was not JSON" };
-  return normalizeAiIntent(parsed);
 }
 
 // Server-side schedule executor — fires every 60 seconds
@@ -730,7 +598,6 @@ select.field{cursor:pointer}
 <div class="card">
 <div class="ch">Add Planned Visit</div>
 <label class="fl">Visitor Name *</label><input class="field" id="pvVisitorName" placeholder="e.g. John Smith">
-<label class="fl">Visitor ID Number *</label><input class="field" id="pvVisitorId" placeholder="ID shown at reception">
 <label class="fl">Resident to Visit</label>
 <select class="field" id="pvResidentSelect"><option value="">Select resident</option></select>
 <label class="fl">Scheduled Date (optional)</label><input class="field" id="pvDate" type="date">
@@ -824,7 +691,6 @@ function get(p){return fetch(p,{cache:"no-store"}).then(function(r){return r.ok?
 function post(p,b){return fetch(p,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b)}).then(function(r){return r.json();}).catch(function(){return{ok:false,error:"Network error"};})}
 function cmd(action,params){params=params||{};notice("Sending...",true);post("/api/command",{action:action,params:params}).then(function(out){notice(out.ok?"Sent: "+action:"Error: "+(out.error||"failed"),out.ok);refresh();});}
 function esc(v){var map={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};return String(v||"").replace(/[&<>"']/g,function(c){return map[c];});}
-function jsq(v){return JSON.stringify(String(v||""));}
 function notice(t,ok){if(ok===undefined)ok=true;var el=document.getElementById("toast");if(!el)return;el.innerHTML=(ok?'<span style="color:#2ec47a;font-size:15px;flex-shrink:0">&#10003;</span>':'<span style="color:#ef5350;font-size:15px;flex-shrink:0">&#10005;</span>')+'<span>'+esc(String(t||""))+'</span>';el.className="toast show "+(ok?"t-ok":"t-err");clearTimeout(notice._t);notice._t=setTimeout(function(){el.className="toast";},3800);}
 function sv(name,el){
   var views=document.querySelectorAll(".view");
@@ -1048,30 +914,23 @@ function loadVisits(){
     if(!el)return;
     var pv=out.plannedVisits||[];
     if(!pv.length){el.innerHTML='<div class="esbox">No planned visits yet. Add one using the form.</div>';}
-    else{el.innerHTML=pv.map(function(v){
-      var idTag=v.visitorIdLast4?(" ID ****"+String(v.visitorIdLast4)):" ID missing";
-      var title=String(v.visitorName||"")+idTag+" -> "+String(v.residentName||"No resident")+(v.room?" ("+String(v.room)+")":"")+(v.scheduledDate?" - "+String(v.scheduledDate):"");
-      return rRow("blue",title,v.notes||"","<button class='btn s d' onclick='deletePlannedVisit("+jsq(v.id)+")'>Remove</button>");
-    }).join("");}
+    else{el.innerHTML=pv.map(function(v){return rRow("blue",esc(v.visitorName)+" → "+esc(v.residentName)+(v.room?" ("+esc(v.room)+")":"")+(v.scheduledDate?" · "+esc(v.scheduledDate):""),v.notes||"","<button class='btn s d' onclick='deletePlannedVisit(\""+esc(v.id)+"\")'>Remove</button>");}).join("");}
     var vl=out.visitLog||[];
     if(ll){if(!vl.length){ll.innerHTML='<div class="esbox muted">No visits recorded yet.</div>';}
-    else{ll.innerHTML=vl.map(function(v){var badge=v.isPlanned?'<span class="pill ok">Planned</span>':'<span class="pill low">Unplanned</span>';return rRow("blue",String(v.visitorName||"")+(v.residentName?" -> "+String(v.residentName):"")+(v.room?" ("+String(v.room)+")":""),new Date(v.loggedAt).toLocaleString()+" "+badge);}).join("");}}
+    else{ll.innerHTML=vl.map(function(v){var badge=v.isPlanned?'<span class="pill ok">Planned</span>':'<span class="pill low">Unplanned</span>';return rRow("blue",esc(v.visitorName)+(v.residentName?" → "+esc(v.residentName):"")+(v.room?" ("+esc(v.room)+")":""),new Date(v.loggedAt).toLocaleString()+" "+badge);}).join("");}}
   });
 }
 function addPlannedVisit(){
   var vn=document.getElementById("pvVisitorName");var vv=vn&&vn.value.trim();
   if(!vv)return notice("Visitor name is required.",false);
-  var vid=document.getElementById("pvVisitorId");var vidv=vid&&vid.value.trim();
-  if(!vidv)return notice("Visitor ID number is required.",false);
   var rs=document.getElementById("pvResidentSelect");var rid=rs&&rs.value;
   var ro=rs&&rs.options&&rs.selectedIndex>=0&&rs.options[rs.selectedIndex];
   var rname=(ro&&ro.text)?ro.text.split(" — ")[0]:"";
   var rroom=(ro&&ro.dataset)?ro.dataset.room||"":"";
-  var rmap=(ro&&ro.dataset)?ro.dataset.map||rroom:"";
   var dt=document.getElementById("pvDate");var nt=document.getElementById("pvNotes");
-  post("/api/planned-visits",{visitorName:vv,visitorIdNumber:vidv,residentId:rid||"",residentName:rname,room:rroom,mapPoint:rmap,scheduledDate:(dt&&dt.value)||"",notes:(nt&&nt.value)||""}).then(function(out){
+  post("/api/planned-visits",{visitorName:vv,residentId:rid||"",residentName:rname,room:rroom,scheduledDate:(dt&&dt.value)||"",notes:(nt&&nt.value)||""}).then(function(out){
     notice(out.ok?"Planned visit added":"Error: "+(out.error||"Could not save"),out.ok);
-    if(out.ok){if(vn)vn.value="";if(vid)vid.value="";if(dt)dt.value="";if(nt)nt.value="";if(rs)rs.selectedIndex=0;loadVisits();}
+    if(out.ok){if(vn)vn.value="";if(dt)dt.value="";if(nt)nt.value="";if(rs)rs.selectedIndex=0;loadVisits();}
   });
 }
 function deletePlannedVisit(id){
@@ -1291,19 +1150,15 @@ function renderAll(s){
   if(crs)crs.innerHTML=res.length?res.map(function(r){return'<option value="'+esc(r.id)+'">'+esc(r.name)+" — Room "+esc(r.room)+"</option>";}).join(""):"<option value='' disabled>No residents yet — add in Residents section</option>";
   if(crs&&crsV){crs.value=crsV;}
   var cri=gi("cmdResInfo");if(cri){var crId=crs&&crs.value;var cr=byId(crId);var lci2=cr&&checkIns[cr.id];cri.textContent=cr?("Room "+cr.room+(cr.careLevel?" · "+cr.careLevel:"")+(lci2?" · Last seen "+timeAgo(lci2):" · No check-in on record")):(res.length?"Select a resident above.":"");}
-  var pvrs=gi("pvResidentSelect");var pvrsV=pvrs&&pvrs.value;
-  if(pvrs)pvrs.innerHTML='<option value="">Select resident</option>'+(res.length?res.map(function(r){return'<option value="'+esc(r.id)+'" data-room="'+esc(r.room||"")+'" data-map="'+esc(r.mapPoint||r.room||"")+'">'+esc(r.name)+(r.room?" — "+esc(r.room):"")+"</option>";}).join(""):"");
-  if(pvrs&&pvrsV){pvrs.value=pvrsV;}
+  var pvrs=gi("pvResidentSelect");if(pvrs)pvrs.innerHTML='<option value="">Select resident</option>'+(res.length?res.map(function(r){return'<option value="'+esc(r.id)+'" data-room="'+esc(r.room||"")+'">'+esc(r.name)+(r.room?" — "+esc(r.room):"")+"</option>";}).join(""):"");
   var cps=gi("cmdPointSelect");var cpsV=cps&&cps.value;
   if(cps)cps.innerHTML=pts.length?pts.map(function(p){return'<option value="'+esc(p.name)+'">'+esc(p.name)+"</option>";}).join(""):"<option value='' disabled>Waiting for Nova to connect...</option>";
   if(cps&&cpsV){cps.value=cpsV;}
-  var cLogs=c.logs||[];
-  var rLogs=(s.commandResults||[]).map(function(r){return{createdAt:r.at,title:"command_result",detail:(r.action||"command")+" -> "+(r.result||"completed")};});
-  var eLogs=(s.events||[]).map(function(e){return{createdAt:e.at,title:e.type,detail:typeof e.data==="object"?Object.keys(e.data||{}).slice(0,4).map(function(k){return k+": "+String(e.data[k]).slice(0,40);}).join(", "):String(e.data||"")};});
-  var logRows=cLogs.concat(rLogs).concat(eLogs).filter(function(l){return l.title!=="state";}).sort(function(a,b){return(b.createdAt||0)-(a.createdAt||0);});
+  var cLogs=c.logs||[];var eLogs=(s.events||[]).map(function(e){return{createdAt:e.at,title:e.type,detail:typeof e.data==="object"?Object.keys(e.data||{}).slice(0,4).map(function(k){return k+": "+String(e.data[k]).slice(0,40);}).join(", "):String(e.data||"")};});
+  var logRows=cLogs.concat(eLogs).filter(function(l){return l.title!=="state";}).sort(function(a,b){return(b.createdAt||0)-(a.createdAt||0);});
   var lc2=gi("logCount");if(lc2){lc2.textContent=logRows.length+" entries";lc2.style.display=logRows.length?"inline-flex":"none";}
-  var LTITLE={"command":"Command sent","command_result":"Robot completed command","result":"Result received","resident":"Resident saved","resident_import":"CSV import","resident_deleted":"Resident removed","alert":"Alert created","alert_dismissed":"Alert dismissed","login":"Staff signed in","login_failed":"Sign-in failed","scheduled_round":"Scheduled round fired","queue_cleared":"Queue cleared","logo_updated":"Logo updated","user_created":"User created","schedule_created":"Schedule created","planned_visit_added":"Planned visit added","visit":"Visitor logged","upsert_resident":"Resident synced to Nova","delete_resident":"Resident removed from Nova"};
-  var LMETA={"command":{ic:"&#9654;",cl:"blue"},"command_result":{ic:"&#10003;",cl:"green"},"result":{ic:"&#10003;",cl:"green"},"resident":{ic:"&#9673;",cl:"purple"},"resident_import":{ic:"&#9673;",cl:"purple"},"resident_deleted":{ic:"&#9673;",cl:"red"},"alert":{ic:"!",cl:"red"},"alert_dismissed":{ic:"&#10003;",cl:"green"},"login":{ic:"&#9679;",cl:"cyan"},"login_failed":{ic:"&#10005;",cl:"red"},"scheduled_round":{ic:"&#8635;",cl:"green"},"queue_cleared":{ic:"&#9747;",cl:"yellow"},"logo_updated":{ic:"&#9998;",cl:"cyan"},"user_created":{ic:"&#9873;",cl:"blue"},"schedule_created":{ic:"&#8635;",cl:"blue"},"planned_visit_added":{ic:"&#43;",cl:"purple"},"visit":{ic:"&#9679;",cl:"cyan"},"upsert_resident":{ic:"&#9673;",cl:"blue"},"delete_resident":{ic:"&#9673;",cl:"red"}};
+  var LTITLE={"command":"Command sent","result":"Result received","resident":"Resident saved","resident_import":"CSV import","resident_deleted":"Resident removed","alert":"Alert created","alert_dismissed":"Alert dismissed","login":"Staff signed in","login_failed":"Sign-in failed","scheduled_round":"Scheduled round fired","queue_cleared":"Queue cleared","logo_updated":"Logo updated","user_created":"User created","schedule_created":"Schedule created","upsert_resident":"Resident synced to Nova","delete_resident":"Resident removed from Nova"};
+  var LMETA={"command":{ic:"&#9654;",cl:"blue"},"result":{ic:"&#10003;",cl:"green"},"resident":{ic:"&#9673;",cl:"purple"},"resident_import":{ic:"&#9673;",cl:"purple"},"resident_deleted":{ic:"&#9673;",cl:"red"},"alert":{ic:"!",cl:"red"},"alert_dismissed":{ic:"&#10003;",cl:"green"},"login":{ic:"&#9679;",cl:"cyan"},"login_failed":{ic:"&#10005;",cl:"red"},"scheduled_round":{ic:"&#8635;",cl:"green"},"queue_cleared":{ic:"&#9747;",cl:"yellow"},"logo_updated":{ic:"&#9998;",cl:"cyan"},"user_created":{ic:"&#9873;",cl:"blue"},"schedule_created":{ic:"&#8635;",cl:"blue"},"upsert_resident":{ic:"&#9673;",cl:"blue"},"delete_resident":{ic:"&#9673;",cl:"red"}};
   ht("opsLog",logRows.length?logRows.slice(0,120).map(function(l){var m=LMETA[l.title]||{ic:"&#9679;",cl:"blue"};var dt=new Date(l.createdAt||Date.now());var diff=Date.now()-(l.createdAt||0);var ts=diff<3600000?timeAgo(l.createdAt):(diff<86400000?dt.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):dt.toLocaleDateString([],{month:"short",day:"numeric"})+" "+dt.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}));return'<div class="row"><div class="dot c-'+m.cl+'" style="font-size:12px;width:32px;height:32px;border-radius:8px">'+m.ic+'</div><div class="rb"><b>'+(LTITLE[l.title]||esc(l.title||"Event"))+'</b><span>'+esc(String(l.detail||"").slice(0,100))+'</span></div><div class="ra" style="font-size:11px;color:#a0b0c8;white-space:nowrap">'+ts+'</div></div>';}).join(""):esb("No activity logged yet. Connect Nova and start managing your facility."));
   ht("settingsRelay",rRow(s.online?"green":"red","Robot Connection",s.online?"Connected &middot; "+new Date(s.lastSeen).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"Not connected — robot offline or wrong token")+rRow(s.camera?"green":"red","Camera Feed",s.camera?"Active":"No frame received")+rRow("blue","Residents",res.length+" registered"+(res.length===0?" &middot; Add residents to begin":""))+rRow("purple","Schedules",(s.scheduledRounds||[]).length+" configured")+rRow(s.storage==="mongodb"?"green":s.lastSaved?"ok":"yellow","Data Storage",s.storage==="mongodb"?"MongoDB &middot; "+(s.lastSaved?"Saved "+timeAgo(s.lastSaved):"Waiting for first save"):s.lastSaved?"File &middot; Saved "+timeAgo(s.lastSaved)+" &middot; Will reset on redeploy":"File &middot; Not yet saved &mdash; set MONGODB_URI to persist across redeploys"));
   var cb=gi("cameraBox");var nc=gi("noCamera");
@@ -1379,28 +1234,11 @@ const server = http.createServer(async (req, res) => {
     return res.end(logoutPage());
   }
 
-  if (url.pathname === "/ai/intent" && req.method === "POST") {
-    if (!isRobot(req)) return sendJson(res, 403, { ok: false, error: "bad robot token" });
-    const body = await readJson(req);
-    if (rejectBadJson(body, res)) return;
-    const phrase = cleanText(body.phrase);
-    if (!phrase) return sendJson(res, 400, { ok: false, error: "phrase is required" });
-    try {
-      const intent = await classifyIntentWithAi(body);
-      log("ai_intent", { phrase: phrase.slice(0, 120), action: intent.action || "fallback", confidence: intent.confidence || 0 });
-      return sendJson(res, 200, intent);
-    } catch (e) {
-      log("ai_intent_error", { error: e.message });
-      return sendJson(res, 200, { ok: false, fallback: true, error: "AI classification failed" });
-    }
-  }
-
   if (url.pathname.startsWith("/robot/")) {
     if (!isRobot(req)) return sendJson(res, 403, { ok: false, error: "bad robot token" });
     robot.online = true; robot.lastSeen = Date.now();
     if (url.pathname === "/robot/state" && req.method === "POST") {
-      const body = await readJson(req);
-      if (rejectBadJson(body, res)) return;
+      const body = JSON.parse((await readBody(req)) || "{}");
       // Detect robot reconnect (gap > 12 s = was offline)
       if (Date.now() - robotLastSeenAt > 12000) robotResidentsSynced = false;
       robotLastSeenAt = Date.now();
@@ -1431,10 +1269,7 @@ const server = http.createServer(async (req, res) => {
       }
       return sendJson(res, 200, { ok: true });
     }
-    if (url.pathname === "/robot/poll") {
-      const commands = commandQueue.splice(0, 20).map(rememberCommand);
-      return sendJson(res, 200, { commands });
-    }
+    if (url.pathname === "/robot/poll") return sendJson(res, 200, { commands: commandQueue.splice(0, 20) });
     if (url.pathname === "/robot/residents" && req.method === "GET") {
       return sendJson(res, 200, { ok: true, residents: facility.residents.map(function(r) {
         return { id: r.id, name: r.name, room: r.room || "", mapPoint: r.mapPoint || r.room || "",
@@ -1447,44 +1282,10 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true });
     }
     if (url.pathname === "/robot/planned-visits" && req.method === "GET") {
-      return sendJson(res, 200, { ok: true, plannedVisits: facility.plannedVisits.map(v => ({
-        id: v.id, visitorName: v.visitorName, visitorIdLast4: v.visitorIdLast4 || "",
-        residentId: v.residentId, residentName: v.residentName, room: v.room,
-        scheduledDate: v.scheduledDate, notes: v.notes, createdAt: v.createdAt
-      })) });
-    }
-    if (url.pathname === "/robot/verify-visit" && req.method === "POST") {
-      const body = await readJson(req);
-      if (rejectBadJson(body, res)) return;
-      const visitorName = cleanText(body.visitorName).toLowerCase();
-      const visitorHash = visitorIdHash(body.visitorIdNumber);
-      const residentId = cleanText(body.residentId);
-      const residentName = cleanText(body.residentName).toLowerCase();
-      const today = new Date().toISOString().slice(0, 10);
-      const match = facility.plannedVisits.find(v => {
-        const nameOk = cleanText(v.visitorName).toLowerCase() === visitorName;
-        const idOk = v.visitorIdHash && v.visitorIdHash === visitorHash;
-        const residentOk = (residentId && v.residentId === residentId) ||
-          (residentName && cleanText(v.residentName).toLowerCase() === residentName);
-        const dateOk = !v.scheduledDate || v.scheduledDate === today;
-        return nameOk && idOk && residentOk && dateOk;
-      });
-      if (!match) {
-        facility.visitLog.unshift({ id: crypto.randomUUID(), visitorName: cleanText(body.visitorName).slice(0, 120), residentName: cleanText(body.residentName).slice(0, 120), room: "", plannedVisitId: "", isPlanned: false, denied: true, loggedAt: Date.now() });
-        if (facility.visitLog.length > 200) facility.visitLog.pop();
-        persistData();
-        log("visit_denied", { visitorName: cleanText(body.visitorName), residentName: cleanText(body.residentName) });
-        return sendJson(res, 200, { ok: false, message: "I could not verify that planned visit. Please check with reception." });
-      }
-      facility.visitLog.unshift({ id: crypto.randomUUID(), visitorName: match.visitorName, residentName: match.residentName, room: match.room, plannedVisitId: match.id, isPlanned: true, loggedAt: Date.now() });
-      if (facility.visitLog.length > 200) facility.visitLog.pop();
-      persistData();
-      log("visit_verified", { visitorName: match.visitorName, residentName: match.residentName });
-      return sendJson(res, 200, { ok: true, residentName: match.residentName, mapPoint: match.mapPoint || match.room, message: "Visit verified." });
+      return sendJson(res, 200, { ok: true, plannedVisits: facility.plannedVisits });
     }
     if (url.pathname === "/robot/visit-log" && req.method === "POST") {
-      const body = await readJson(req);
-      if (rejectBadJson(body, res)) return;
+      const body = JSON.parse((await readBody(req)) || "{}");
       const entry = { id: crypto.randomUUID(), visitorName: String(body.visitorName || "Unknown").slice(0, 120), residentName: String(body.residentName || "").slice(0, 120), room: String(body.room || "").slice(0, 80), plannedVisitId: String(body.plannedVisitId || ""), isPlanned: !!body.isPlanned, loggedAt: typeof body.loggedAt === "number" ? body.loggedAt : Date.now() };
       facility.visitLog.unshift(entry);
       if (facility.visitLog.length > 200) facility.visitLog.pop();
@@ -1493,25 +1294,16 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true });
     }
     if (url.pathname === "/robot/result" && req.method === "POST") {
-      const data = await readJson(req);
-      if (rejectBadJson(data, res)) return;
-      const known = recentCommands.get(data.id) || {};
-      const p = (data.params && typeof data.params === "object") ? data.params : (known.params || {});
-      const action = cleanText(data.action || known.action);
-      const result = cleanText(data.result || data.message || "");
-      const completedAt = typeof data.completedAt === "number" ? data.completedAt : Date.now();
-      const record = { id: cleanText(data.id) || crypto.randomUUID(), action, params: p, result, ok: data.ok !== false, at: completedAt };
-      commandResults.unshift(record);
-      if (commandResults.length > 200) commandResults.pop();
-      const completed = record.ok && /complete|completed|delivered|arrived|done|finished/i.test(result);
-      if (completed && action === "resident_checkin" && p.residentId) { facility.checkIns[p.residentId] = Date.now(); persistData(); }
-      if (completed && action === "start_rounds" && Array.isArray(p.residents)) {
+      const data = JSON.parse((await readBody(req)) || "{}");
+      const p = data.params || {};
+      if (data.action === "resident_checkin" && p.residentId) { facility.checkIns[p.residentId] = Date.now(); persistData(); }
+      if (data.action === "start_rounds" && Array.isArray(p.residents)) {
         p.residents.forEach(function(r) { if (r.id) facility.checkIns[r.id] = Date.now(); });
         roundHistory.unshift({ id: crypto.randomUUID(), name: p.scheduleName || "Manual Round", type: p.type || "checkin", trigger: p.scheduleName ? "schedule" : "manual", count: p.residents.length, at: Date.now() });
         if (roundHistory.length > 30) roundHistory.pop();
         persistData();
       }
-      log("result", record); return sendJson(res, 200, { ok: true });
+      log("result", data); return sendJson(res, 200, { ok: true });
     }
   }
 
@@ -1524,7 +1316,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === "/api/state") {
     const stale = Date.now() - robot.lastSeen > 15000;
-    return sendJson(res, 200, { ...robot, online: robot.online && !stale, care: mergedCare(), camera: !!robot.cameraJpegBase64, events, scheduledRounds, roundHistory, commandResults, facility: { roundOrder: facility.roundOrder, checkIns: facility.checkIns }, lastSaved, storage: mongoDb ? "mongodb" : "file" });
+    return sendJson(res, 200, { ...robot, online: robot.online && !stale, care: mergedCare(), camera: !!robot.cameraJpegBase64, events, scheduledRounds, roundHistory, facility: { roundOrder: facility.roundOrder, checkIns: facility.checkIns }, lastSaved, storage: mongoDb ? "mongodb" : "file" });
   }
   if (url.pathname === "/api/camera.jpg") {
     if (!robot.cameraJpegBase64) return sendText(res, 404, "No camera snapshot");
@@ -1537,8 +1329,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === "/api/users" && req.method === "POST") {
     const actor = requireRole(req, res, "admin"); if (!actor) return;
-    const body = await readJson(req);
-    if (rejectBadJson(body, res)) return;
+    const body = JSON.parse((await readBody(req)) || "{}");
     const username = cleanText(body.username).toLowerCase(), password = String(body.password || "");
     const role = ["admin","operator","viewer"].includes(cleanText(body.role)) ? cleanText(body.role) : "operator";
     if (!/^[a-z0-9._-]{3,40}$/.test(username)) return sendJson(res, 400, { ok: false, error: "username must be 3-40 letters, numbers, dot, dash, or underscore" });
@@ -1548,8 +1339,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === "/api/logo" && req.method === "POST") {
     const actor = requireRole(req, res, "admin"); if (!actor) return;
-    const body = await readJson(req);
-    if (rejectBadJson(body, res)) return;
+    const body = JSON.parse((await readBody(req)) || "{}");
     const dataUrl = String(body.dataUrl || "");
     if (!/^data:image\/(png|jpg|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return sendJson(res, 400, { ok: false, error: "Upload PNG, JPG, or WEBP." });
     if (Buffer.byteLength(dataUrl) > 7_000_000) return sendJson(res, 413, { ok: false, error: "Logo too large." });
@@ -1563,9 +1353,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === "/api/residents" && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
-    const body = await readJson(req);
-    if (rejectBadJson(body, res)) return;
-    const resident = toResident(body);
+    const resident = toResident(JSON.parse((await readBody(req)) || "{}"));
     if (!resident) return sendJson(res, 400, { ok: false, error: "full_name and room are required" });
     const idx = facility.residents.findIndex(r => r.id === resident.id);
     if (idx >= 0) facility.residents[idx] = resident; else facility.residents.push(resident);
@@ -1597,8 +1385,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === "/api/alerts" && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
-    const body = await readJson(req);
-    if (rejectBadJson(body, res)) return;
+    const body = JSON.parse((await readBody(req)) || "{}");
     const alert = { id: crypto.randomUUID(), createdAt: Date.now(), priority: cleanText(body.priority) || "urgent", room: cleanText(body.room), message: cleanText(body.message) || "Staff assistance requested." };
     facility.alerts.unshift(alert);
     facility.logs.push({ createdAt: Date.now(), title: "Alert created", detail: `${alert.room || "Facility"} - ${alert.message}` });
@@ -1609,54 +1396,29 @@ const server = http.createServer(async (req, res) => {
   if (alertDismissMatch && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
     const alertId = decodeURIComponent(alertDismissMatch[1]);
-    const idx = facility.alerts.findIndex(a => String(a.id) === String(alertId));
+    const idx = facility.alerts.findIndex(a => a.id === alertId);
     if (idx >= 0) facility.alerts.splice(idx, 1);
-    if (!facility.dismissedAlertIds.map(String).includes(String(alertId))) {
-      facility.dismissedAlertIds.push(String(alertId));
-      if (facility.dismissedAlertIds.length > 500) facility.dismissedAlertIds.splice(0, facility.dismissedAlertIds.length - 500);
-    }
     facility.logs.push({ createdAt: Date.now(), title: "Alert dismissed", detail: alertId });
     persistData(); log("alert_dismissed", { id: alertId }); return sendJson(res, 200, { ok: true });
   }
   if (url.pathname === "/api/command" && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
-    const body = await readJson(req);
-    if (rejectBadJson(body, res)) return;
+    const body = JSON.parse((await readBody(req)) || "{}");
     const command = { id: crypto.randomUUID(), at: Date.now(), action: cleanText(body.action), params: body.params || {} };
     if (!command.action) return sendJson(res, 400, { ok: false, error: "action is required" });
-    commandQueue.push(rememberCommand(command));
+    commandQueue.push(command);
     facility.logs.push({ createdAt: Date.now(), title: "Command queued", detail: `${command.action} ${JSON.stringify(command.params)}` });
     log("command", command); return sendJson(res, 200, { ok: true, command });
   }
   if (url.pathname === "/api/planned-visits" && req.method === "GET") {
-    return sendJson(res, 200, { ok: true, plannedVisits: facility.plannedVisits.map(v => ({
-      id: v.id, visitorName: v.visitorName, visitorIdLast4: v.visitorIdLast4 || "",
-      residentId: v.residentId, residentName: v.residentName, room: v.room,
-      mapPoint: v.mapPoint || v.room || "", scheduledDate: v.scheduledDate,
-      notes: v.notes, createdAt: v.createdAt
-    })), visitLog: facility.visitLog.slice(0, 50) });
+    return sendJson(res, 200, { ok: true, plannedVisits: facility.plannedVisits, visitLog: facility.visitLog.slice(0, 50) });
   }
   if (url.pathname === "/api/planned-visits" && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
-    const body = await readJson(req);
-    if (rejectBadJson(body, res)) return;
+    const body = JSON.parse((await readBody(req)) || "{}");
     const visitorName = String(body.visitorName || "").trim();
     if (!visitorName) return sendJson(res, 400, { ok: false, error: "visitorName is required" });
-    const visitorId = String(body.visitorIdNumber || "").trim();
-    if (!visitorId) return sendJson(res, 400, { ok: false, error: "visitorIdNumber is required" });
-    const entry = {
-      id: crypto.randomUUID(),
-      visitorName: visitorName.slice(0, 120),
-      visitorIdHash: visitorIdHash(visitorId),
-      visitorIdLast4: visitorIdLast4(visitorId),
-      residentId: String(body.residentId || ""),
-      residentName: String(body.residentName || "").slice(0, 120),
-      room: String(body.room || "").slice(0, 80),
-      mapPoint: String(body.mapPoint || body.room || "").slice(0, 120),
-      scheduledDate: String(body.scheduledDate || ""),
-      notes: String(body.notes || "").slice(0, 500),
-      createdAt: Date.now()
-    };
+    const entry = { id: crypto.randomUUID(), visitorName: visitorName.slice(0, 120), residentId: String(body.residentId || ""), residentName: String(body.residentName || "").slice(0, 120), room: String(body.room || "").slice(0, 80), scheduledDate: String(body.scheduledDate || ""), notes: String(body.notes || "").slice(0, 500), createdAt: Date.now() };
     facility.plannedVisits.push(entry);
     persistData();
     log("planned_visit_added", { visitorName, residentName: entry.residentName });
@@ -1677,8 +1439,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === "/api/schedules" && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
-    const body = await readJson(req);
-    if (rejectBadJson(body, res)) return;
+    const body = JSON.parse((await readBody(req)) || "{}");
     const name = cleanText(body.name); if (!name) return sendJson(res, 400, { ok: false, error: "name required" });
     const schedule = { id: crypto.randomUUID(), name, type: ["checkin","medication","full"].includes(body.type) ? body.type : "checkin", time: /^\d{2}:\d{2}$/.test(body.time || "") ? body.time : "09:00", days: body.days || "daily", residentIds: Array.isArray(body.residentIds) ? body.residentIds : [], enabled: true, createdAt: Date.now(), lastRun: null };
     scheduledRounds.push(schedule); persistData(); log("schedule_created", { name }); return sendJson(res, 200, { ok: true, schedule });
@@ -1701,8 +1462,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === "/api/round-order" && req.method === "PUT") {
     if (!requireRole(req, res, "operator")) return;
-    const body = await readJson(req);
-    if (rejectBadJson(body, res)) return;
+    const body = JSON.parse((await readBody(req)) || "{}");
     if (Array.isArray(body.order)) { facility.roundOrder = body.order; persistData(); }
     return sendJson(res, 200, { ok: true });
   }
@@ -1726,8 +1486,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === "/api/settings" && req.method === "POST") {
     const actor = requireRole(req, res, "admin"); if (!actor) return;
-    const body = await readJson(req);
-    if (rejectBadJson(body, res)) return;
+    const body = JSON.parse((await readBody(req)) || "{}");
     if (typeof body.robotAddPin === "string") {
       facility.robotAddPin = body.robotAddPin.trim().slice(0, 20);
       commandQueue.push({ id: crypto.randomUUID(), at: Date.now(), action: "update_settings", params: { robot_add_pin: facility.robotAddPin } });
