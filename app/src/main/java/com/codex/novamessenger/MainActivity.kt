@@ -76,6 +76,7 @@ class MainActivity : Activity() {
     internal lateinit var careWorkflow: CareWorkflow
     internal lateinit var messageDelivery: MessageDelivery
     internal lateinit var guestAssist: GuestAssist
+    internal lateinit var aiIntentClient: AiIntentClient
 
     // State delegated to ViewModel
     internal var lastStatus: String get() = vm.lastStatus; set(v) { vm.lastStatus = v }
@@ -101,6 +102,7 @@ class MainActivity : Activity() {
     internal var activeRoundIds: List<String> get() = vm.activeRoundIds; set(v) { vm.activeRoundIds = v }
     internal var activeRoundIndex: Int get() = vm.activeRoundIndex; set(v) { vm.activeRoundIndex = v }
     internal var voiceListening: Boolean get() = vm.voiceListening; set(v) { vm.voiceListening = v }
+    internal var aiUnderstandingEnabled: Boolean get() = vm.aiUnderstandingEnabled; set(v) { vm.aiUnderstandingEnabled = v }
     internal val assistHandler = Handler(Looper.getMainLooper())
     private val securityHandler = Handler(Looper.getMainLooper())
     private val mapHandler = Handler(Looper.getMainLooper())
@@ -174,6 +176,7 @@ class MainActivity : Activity() {
         vm.homeBase = prefs.getString("home_base", "Reception") ?: "Reception"
         vm.afterMissionBehavior = prefs.getString("after_mission_behavior", "home_base") ?: "home_base"
         vm.batteryLowPercent = prefs.getInt("battery_low_percent", 20)
+        vm.aiUnderstandingEnabled = prefs.getBoolean("ai_understanding_enabled", true)
         robot = DirectNovaRobotAdapter(this)
         cameraFeed = CameraFeedManager(this)
         voice = VoiceMessageManager(this)
@@ -183,6 +186,7 @@ class MainActivity : Activity() {
         careWorkflow = CareWorkflow(this)
         messageDelivery = MessageDelivery(this)
         guestAssist = GuestAssist(this)
+        aiIntentClient = AiIntentClient(this)
         remoteServer = RemoteControlServer(
             username = prefs.getString("remote_username", "admin") ?: "admin",
             password = localServerPassword(),
@@ -679,6 +683,7 @@ class MainActivity : Activity() {
             .put("lastDetectedPerson", lastDetectedPerson)
             .put("homeBase", vm.homeBase)
             .put("afterMissionBehavior", vm.afterMissionBehavior)
+            .put("aiUnderstanding", aiUnderstandingEnabled)
         robot.getRobotPose()?.let {
             status.put(
                 "robotPose",
@@ -917,6 +922,12 @@ class MainActivity : Activity() {
         cloudRelay.stop()
         cloudRelay.start()
         setStatus("Cloud settings saved. Reconnecting...")
+    }
+
+    internal fun saveAiSettings() {
+        prefs.edit()
+            .putBoolean("ai_understanding_enabled", aiUnderstandingEnabled)
+            .apply()
     }
 
     internal fun localIpAddress(): String =

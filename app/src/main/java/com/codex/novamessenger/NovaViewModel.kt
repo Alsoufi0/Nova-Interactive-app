@@ -24,6 +24,7 @@ class NovaViewModel {
     var activeRoundIds: List<String> = emptyList()
     var activeRoundIndex = -1
     var voiceListening = false
+    @Volatile var aiUnderstandingEnabled = true
 
     // Operator-configurable timing settings
     @Volatile var roundWaitSeconds = 22

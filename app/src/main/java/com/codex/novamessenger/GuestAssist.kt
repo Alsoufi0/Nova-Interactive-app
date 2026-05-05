@@ -126,8 +126,17 @@ class GuestAssist(private val activity: MainActivity) {
     }
 
     fun handleGuestIntent(phrase: String) {
-        val lower = phrase.lowercase()
         activity.setStatus("Heard: $phrase")
+        activity.aiIntentClient.classify(phrase) { ai ->
+            activity.runOnUiThread {
+                val handled = ai != null && handleAiIntent(phrase, ai)
+                if (!handled) handleRuleBasedIntent(phrase)
+            }
+        }
+    }
+
+    private fun handleRuleBasedIntent(phrase: String) {
+        val lower = phrase.lowercase()
         when {
             isStopIntent(lower) -> {
                 activity.stopAll()
@@ -181,6 +190,122 @@ class GuestAssist(private val activity: MainActivity) {
             }
         }
     }
+
+    private fun handleAiIntent(phrase: String, ai: AiIntentResult): Boolean {
+        if (!ai.ok || ai.confidence < 0.55) return false
+        val lower = phrase.lowercase()
+        return when (ai.action) {
+            "stop" -> {
+                activity.stopAll()
+                stopGuestAssist()
+                activity.speakReply(ai.reply ?: "Okay, I stopped.")
+                true
+            }
+            "follow_stop" -> {
+                activity.follow.stop()
+                activity.robot.stopFollowTarget()
+                activity.robot.stopMove()
+                activity.setTask("Follow stopped", "Ready", "Awaiting request", 0)
+                activity.setStatus("Follow stopped by voice.")
+                activity.speakReply(ai.reply ?: "I stopped following.")
+                true
+            }
+            "capabilities" -> {
+                activity.speakReply(ai.reply ?: novaCapabilitiesText())
+                true
+            }
+            "send_message" -> {
+                val destination = resolveAiDestination(ai, lower) ?: activity.destination()
+                val body = ai.message?.takeIf { it.length >= 4 } ?: extractMessageBody(phrase, destination)
+                activity.messageDelivery.handleVoiceSendAction(body, destination, "visitor")
+                true
+            }
+            "guide" -> {
+                val destination = resolveAiDestination(ai, lower) ?: return false
+                activity.setDestinationText(destination)
+                activity.speakReply(ai.reply ?: "I will guide you to $destination.")
+                activity.goToDestination()
+                true
+            }
+            "resident_checkin" -> {
+                val resident = resolveAiResident(ai, lower)
+                if (resident == null) {
+                    activity.speakReply(ai.reply ?: "Which resident should I check on? Please say the resident name or room.")
+                } else {
+                    activity.careWorkflow.runResidentCheckIn(resident.id)
+                }
+                true
+            }
+            "med_reminder" -> {
+                val resident = resolveAiResident(ai, lower)
+                if (resident == null) {
+                    activity.speakReply(ai.reply ?: "Which resident needs the medication reminder?")
+                } else {
+                    activity.careWorkflow.runReminderForResident(resident.id)
+                }
+                true
+            }
+            "start_rounds" -> {
+                activity.careWorkflow.startCareRound()
+                true
+            }
+            "staff_alert" -> {
+                val priority = ai.priority?.takeIf { it.equals("urgent", true) } ?: if (isUrgent(lower)) "urgent" else "normal"
+                val room = ai.destination ?: inferRoom(lower).orEmpty()
+                activity.careWorkflow.createStaffAlert(priority, room, ai.message ?: phrase)
+                true
+            }
+            "follow_start" -> {
+                activity.speakReply(ai.reply ?: "I will follow slowly. Please stay in front of me.")
+                activity.startFollowMode()
+                true
+            }
+            "camera_start" -> {
+                activity.currentPage = "camera"
+                activity.setContentView(activity.buildUi())
+                activity.startCameraFeed()
+                true
+            }
+            "security_start" -> {
+                activity.currentPage = "camera"
+                activity.setContentView(activity.buildUi())
+                activity.startSecurityWatch()
+                true
+            }
+            else -> false
+        }
+    }
+
+    private fun resolveAiDestination(ai: AiIntentResult, lowerPhrase: String): String? {
+        val requested = ai.destination
+            ?: inferDestination(lowerPhrase)
+            ?: inferDestinationFromWords(lowerPhrase)
+            ?: inferRoom(lowerPhrase)
+        return requested?.let { activity.careWorkflow.resolveMapPoint(it) }
+    }
+
+    private fun resolveAiResident(ai: AiIntentResult, lowerPhrase: String): CareResident? {
+        val residents = activity.careRepo.residents()
+        ai.residentId?.let { id -> residents.firstOrNull { it.id.equals(id, ignoreCase = true) } }?.let { return it }
+        ai.residentName?.lowercase()?.let { name ->
+            residents.firstOrNull {
+                it.name.lowercase().contains(name) ||
+                    name.contains(it.name.lowercase()) ||
+                    it.room.lowercase().contains(name)
+            }
+        }?.let { return it }
+        ai.destination?.lowercase()?.let { dest ->
+            residents.firstOrNull {
+                it.room.lowercase().contains(dest) ||
+                    it.mapPoint.lowercase().contains(dest) ||
+                    dest.contains(it.room.lowercase())
+            }
+        }?.let { return it }
+        return findResidentFromSpeech(lowerPhrase)
+    }
+
+    private fun isUrgent(lower: String): Boolean =
+        listOf("urgent", "emergency", "fall", "fell", "pain", "can't breathe", "cannot breathe").any { lower.contains(it) }
 
     private fun inferDestination(lowerPhrase: String): String? {
         val known = activity.lastMapPoints.map { it.name }.ifEmpty {

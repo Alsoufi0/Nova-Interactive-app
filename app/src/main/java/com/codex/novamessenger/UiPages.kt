@@ -1124,8 +1124,18 @@ internal fun MainActivity.settingsPanel(): View {
     })
     box.addView(buttonRow(
         compactStatus("Local Console", "http://${localIpAddress()}:8787"),
-        compactStatus("Cloud Sync", "2 sec polling")
+        compactStatus("Cloud Sync", "2 sec polling"),
+        compactStatus("Language", if (aiUnderstandingEnabled) "Cloud AI + rules" else "Rules only")
     ))
+    box.addView(actionButton(
+        if (aiUnderstandingEnabled) "Use Rules Only" else "Enable Cloud AI Understanding",
+        if (aiUnderstandingEnabled) Neutral else Primary
+    ) {
+        aiUnderstandingEnabled = !aiUnderstandingEnabled
+        saveAiSettings()
+        setStatus(if (aiUnderstandingEnabled) "AI understanding enabled. Nova will use cloud intent parsing when configured." else "AI understanding disabled. Nova will use local phrase rules.")
+        setContentView(buildUi())
+    }.apply { layoutParams = full().apply { topMargin = dp(8); bottomMargin = dp(8) } })
     val cloudUrlInput = input("https://...", cloudUrl())
     val cloudTokenInput = input("Robot token", cloudToken())
     box.addView(label("Cloud relay URL"))
@@ -1146,6 +1156,7 @@ internal fun MainActivity.settingsPanel(): View {
         vm.guestCooldownSeconds = guestCooldownInput.text.toString().toIntOrNull()?.coerceIn(10, 300) ?: 45
         vm.batteryLowPercent = batteryLowInput.text.toString().toIntOrNull()?.coerceIn(5, 50) ?: 20
         saveTimingSettings()
+        saveAiSettings()
         saveCloudSettings(cloudUrlInput.text.toString(), cloudTokenInput.text.toString())
     }.apply { layoutParams = full().apply { topMargin = dp(10) } })
 

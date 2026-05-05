@@ -222,6 +222,103 @@ function mergedCare() {
   };
 }
 
+const AI_ALLOWED_ACTIONS = new Set([
+  "send_message", "guide", "staff_alert", "resident_checkin", "med_reminder",
+  "start_rounds", "follow_start", "follow_stop", "camera_start", "security_start",
+  "stop", "capabilities", "unknown"
+]);
+
+function safeAiString(value, max = 500) {
+  return cleanText(value).slice(0, max);
+}
+function extractJsonObject(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (_) {}
+  const start = raw.indexOf("{"), end = raw.lastIndexOf("}");
+  if (start >= 0 && end > start) {
+    try { return JSON.parse(raw.slice(start, end + 1)); } catch (_) {}
+  }
+  return null;
+}
+function normalizeAiIntent(parsed) {
+  const action = safeAiString(parsed && parsed.action, 40).toLowerCase();
+  if (!AI_ALLOWED_ACTIONS.has(action)) {
+    return { ok: true, action: "unknown", confidence: 0, reply: "Please ask me again in a simpler way." };
+  }
+  const priority = safeAiString(parsed && parsed.priority, 20).toLowerCase();
+  return {
+    ok: true,
+    action,
+    confidence: Math.max(0, Math.min(1, Number(parsed && parsed.confidence || 0))),
+    destination: safeAiString(parsed && parsed.destination, 120),
+    residentId: safeAiString(parsed && parsed.residentId, 120),
+    residentName: safeAiString(parsed && parsed.residentName, 120),
+    message: safeAiString(parsed && parsed.message, 500),
+    priority: ["normal", "urgent"].includes(priority) ? priority : "normal",
+    reply: safeAiString(parsed && parsed.reply, 500),
+  };
+}
+function buildAiPrompt(body) {
+  const mapPoints = Array.isArray(body.mapPoints) ? body.mapPoints.slice(0, 80).map(p => ({
+    name: safeAiString(p && p.name, 120),
+    status: Number(p && p.status || 0),
+  })) : [];
+  const residents = Array.isArray(body.residents) ? body.residents.slice(0, 120).map(r => ({
+    id: safeAiString(r && r.id, 80),
+    name: safeAiString(r && r.name, 120),
+    room: safeAiString(r && r.room, 120),
+    mapPoint: safeAiString(r && r.mapPoint, 120),
+  })) : [];
+  return [
+    {
+      role: "system",
+      content: [
+        "You classify spoken requests for Nova, a healthcare and elder-care concierge robot.",
+        "Return only compact JSON. Do not include markdown.",
+        "Allowed actions: send_message, guide, staff_alert, resident_checkin, med_reminder, start_rounds, follow_start, follow_stop, camera_start, security_start, stop, capabilities, unknown.",
+        "Use known map points and residents only. Do not invent destinations or resident IDs.",
+        "If destination or resident is unclear, action unknown and reply with one short clarifying question.",
+        "For send_message, extract the message content if the user already said it; otherwise leave message empty so Nova can record it.",
+        "For staff_alert, use priority urgent for emergency, fall, pain, breathing, or immediate danger.",
+        "JSON shape: {\"action\":\"...\",\"confidence\":0.0,\"destination\":\"\",\"residentId\":\"\",\"residentName\":\"\",\"message\":\"\",\"priority\":\"normal|urgent\",\"reply\":\"\"}"
+      ].join(" ")
+    },
+    {
+      role: "user",
+      content: JSON.stringify({
+        phrase: safeAiString(body.phrase, 500),
+        currentDestination: safeAiString(body.currentDestination, 120),
+        mapPoints,
+        residents,
+      })
+    }
+  ];
+}
+async function classifyIntentWithAi(body) {
+  const key = process.env.OPENAI_API_KEY || process.env.AI_API_KEY || "";
+  if (!key) return { ok: false, fallback: true, error: "AI model is not configured" };
+  const endpoint = process.env.AI_BASE_URL || "https://api.openai.com/v1/chat/completions";
+  const model = process.env.AI_MODEL || "gpt-4o-mini";
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model, temperature: 0, messages: buildAiPrompt(body) }),
+  });
+  const text = await response.text();
+  if (!response.ok) return { ok: false, fallback: true, error: `AI request failed: ${response.status}` };
+  let content = "";
+  try {
+    const data = JSON.parse(text);
+    content = data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : "";
+  } catch (_) {
+    content = text;
+  }
+  const parsed = extractJsonObject(content);
+  if (!parsed) return { ok: false, fallback: true, error: "AI response was not JSON" };
+  return normalizeAiIntent(parsed);
+}
+
 // Server-side schedule executor — fires every 60 seconds
 setInterval(function () {
   const now = new Date();
@@ -1257,6 +1354,22 @@ const server = http.createServer(async (req, res) => {
     const sid = parseCookies(req).nova_session; if (sid) sessions.delete(sid);
     res.writeHead(200, { "set-cookie": "nova_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0", "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
     return res.end(logoutPage());
+  }
+
+  if (url.pathname === "/ai/intent" && req.method === "POST") {
+    if (!isRobot(req)) return sendJson(res, 403, { ok: false, error: "bad robot token" });
+    const body = await readJson(req);
+    if (rejectBadJson(body, res)) return;
+    const phrase = cleanText(body.phrase);
+    if (!phrase) return sendJson(res, 400, { ok: false, error: "phrase is required" });
+    try {
+      const intent = await classifyIntentWithAi(body);
+      log("ai_intent", { phrase: phrase.slice(0, 120), action: intent.action || "fallback", confidence: intent.confidence || 0 });
+      return sendJson(res, 200, intent);
+    } catch (e) {
+      log("ai_intent_error", { error: e.message });
+      return sendJson(res, 200, { ok: false, fallback: true, error: "AI classification failed" });
+    }
   }
 
   if (url.pathname.startsWith("/robot/")) {

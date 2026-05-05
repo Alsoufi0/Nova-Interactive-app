@@ -7,6 +7,7 @@ Android/Kotlin app for OrionStar GreetingBot Nova / AgentOS reception workflows.
 - Follows a nearby person using Orion RobotAPI body/person-shape detection, without requiring face identity.
 - Navigates to a named map point such as `Reception`, `Meeting Room A`, or `VIP Desk`.
 - Runs a Guest Assist mode that greets nearby guests, listens for intent, and offers to take a message, follow, or guide.
+- Optionally uses a cloud-hosted AI intent model to understand natural phrases such as "can you send a message to reception", "please take me to room 204", "call a nurse", or "stop following me".
 - Asks: `What do you want <point name> to know?`
 - Records the original spoken message, or uses local speech-to-text for a text-only message.
 - At the destination, Nova can replay the original recording or speak the transcribed/typed text.
@@ -89,6 +90,23 @@ Password: <your-password>
 Nova connects outbound to this relay, so a phone can reach it from anywhere without keeping a laptop connected by ADB. The relay can show Nova online status, map points, camera snapshots, people detections, residents, reminders, alerts, and care logs. It can send commands for visitor guide, family message delivery, staff alert, check-in round, resident check-in, medication reminder, safety detection, camera open/close, charge, and emergency stop.
 
 Healthcare workflow:
+
+### Cloud AI Understanding
+
+Nova does not store an AI provider key inside the Android app. To enable AI-level language understanding, configure these environment variables on the Render cloud relay:
+
+```text
+OPENAI_API_KEY=<your-provider-key>
+AI_MODEL=gpt-4o-mini
+```
+
+Optional:
+
+```text
+AI_BASE_URL=https://api.openai.com/v1/chat/completions
+```
+
+When configured, Nova sends the recognized phrase plus current map points/residents to `/ai/intent`. The cloud returns one approved action, such as `send_message`, `guide`, `staff_alert`, `resident_checkin`, `follow_start`, `follow_stop`, `camera_start`, `security_start`, `stop`, or `capabilities`. If the model is not configured or fails, Nova automatically falls back to the local rule-based intent parser.
 
 1. Open the Care tab on Nova or the cloud relay on your phone.
 2. Use Start Check-In Round for resident rounds.
