@@ -230,6 +230,15 @@ class MainActivity : Activity() {
         handleIncomingIntent(intent)
     }
 
+    override fun onBackPressed() {
+        if (currentPage != "home") {
+            currentPage = "home"
+            setContentView(buildUi())
+        } else {
+            super.onBackPressed()
+        }
+    }
+
     override fun onPause() {
         if (isRecording) messageDelivery.stopRecordingAndSave()
         super.onPause()
@@ -281,6 +290,7 @@ class MainActivity : Activity() {
         when (currentPage) {
             "message"      -> root.addView(messagePage())
             "care"         -> root.addView(carePage())
+            "residents"    -> root.addView(residentsPage())
             "destinations" -> root.addView(destinationsPage())
             "robot"        -> root.addView(robotPage())
             "camera"       -> root.addView(cameraPage())
@@ -296,7 +306,9 @@ class MainActivity : Activity() {
     internal fun goToDestination() {
         saveSettings()
         follow.stop()
-        val dest = destination()
+        val requested = destination()
+        val dest = careWorkflow.resolveMapPoint(requested)
+        setDestinationText(dest)
         setTask("Guiding to $dest", "Navigating", "Arrive at destination", 55)
         setStatus("Navigating to $dest...")
         val result = robot.startNavigation(dest) { setStatus(it) }
@@ -948,8 +960,6 @@ class MainActivity : Activity() {
             canvas.save()
             canvas.clipPath(clip)
 
-            drawGrid(canvas)
-
             val mappable = points.filter { it.x != null && it.y != null }
             if (mappable.isEmpty()) {
                 canvas.restore()
@@ -962,11 +972,15 @@ class MainActivity : Activity() {
             val ys = mappable.mapNotNull { it.y } + listOfNotNull(pose?.y)
             val rawMinX = xs.minOrNull()!!; val rawMaxX = xs.maxOrNull()!!
             val rawMinY = ys.minOrNull()!!; val rawMaxY = ys.maxOrNull()!!
-            val mgnX = max(0.5, (rawMaxX - rawMinX) * 0.22)
-            val mgnY = max(0.5, (rawMaxY - rawMinY) * 0.22)
-            val originX = rawMinX - mgnX; val originY = rawMinY - mgnY
-            val spanX = max(1.0, rawMaxX - rawMinX + mgnX * 2)
-            val spanY = max(1.0, rawMaxY - rawMinY + mgnY * 2)
+            val rawSpanX = max(1.0, rawMaxX - rawMinX)
+            val rawSpanY = max(1.0, rawMaxY - rawMinY)
+            val squareSpan = max(rawSpanX, rawSpanY) * 1.28
+            val centerX = (rawMinX + rawMaxX) / 2.0
+            val centerY = (rawMinY + rawMaxY) / 2.0
+            val originX = centerX - squareSpan / 2.0
+            val originY = centerY - squareSpan / 2.0
+            val spanX = squareSpan
+            val spanY = squareSpan
 
             fun toScreen(px: Double?, py: Double?): Pair<Float, Float>? {
                 if (px == null || py == null) return null
@@ -991,7 +1005,11 @@ class MainActivity : Activity() {
             }
 
             // Points
-            mappable.forEach { point ->
+            val visiblePoints = mappable.filter {
+                it.name.equals(selectedPointName, ignoreCase = true) ||
+                    (alertRoom?.isNotBlank() == true && (it.name.contains(alertRoom, ignoreCase = true) || alertRoom.contains(it.name, ignoreCase = true)))
+            }.ifEmpty { mappable.take(12) }
+            visiblePoints.forEach { point ->
                 val screen = toScreen(point.x, point.y) ?: return@forEach
                 val isSelected = point.name.equals(selectedPointName, ignoreCase = true)
                 val isAlert = alertRoom?.isNotBlank() == true &&
@@ -1013,7 +1031,7 @@ class MainActivity : Activity() {
                     paint.color = color
                     canvas.drawCircle(screen.first, screen.second, r + dp(4), paint)
                 }
-                drawPointLabel(canvas, point.name, screen.first, screen.second, color, isSelected || isAlert)
+                if (isSelected || isAlert) drawPointLabel(canvas, point.name, screen.first, screen.second, color, true)
             }
 
             // Robot

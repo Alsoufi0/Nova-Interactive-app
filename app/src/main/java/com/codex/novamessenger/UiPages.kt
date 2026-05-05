@@ -270,10 +270,6 @@ internal fun MainActivity.homePage(): View {
         ))
     })
 
-    root.addView(buttonRow(
-        actionButton("Follow Assist", Neutral) { startFollowMode(); currentPage = "robot"; setContentView(buildUi()) },
-        actionButton("Settings", Neutral) { currentPage = "robot"; setContentView(buildUi()) }
-    ))
     return root
 }
 internal fun MainActivity.homeFeatureCard(title: String, subtitle: String, badge: String?, color: Int, onClick: () -> Unit): View {
@@ -323,10 +319,8 @@ internal fun MainActivity.homeFeatureCard(title: String, subtitle: String, badge
 
 internal fun MainActivity.messagePage(): View {
     val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    root.addView(pageHero("Visitor Message", "Capture a message, choose the care desk or room, and let Nova deliver it."))
+    root.addView(backHeader("Visitor Message"))
     root.addView(workflowCard())
-    root.addView(messageQueuePanel())
-    messageDelivery.refreshMessages()
     return root
 }
 
@@ -335,15 +329,23 @@ internal fun MainActivity.carePage(): View {
     root.addView(pageHero("Care Rounds", "Check-ins, medication reminders, and resident visits."))
     root.addView(careActionsPanel())
     if (careRepo.alerts().isNotEmpty()) root.addView(activeAlertsPanel())
-    root.addView(careResidentsPanel())
+    root.addView(careResidentAccessPanel())
     root.addView(careToolsCard())
+    return root
+}
+
+internal fun MainActivity.residentsPage(): View {
+    val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    root.addView(pageHero("Residents & Rooms", "Private resident records and navigation pins. Manage them from cloud when possible."))
+    root.addView(careResidentsPanel())
     return root
 }
 
 internal fun MainActivity.destinationsPage(): View {
     val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    root.addView(pageHero("Facility Map", "Saved rooms, care desks, and visitor destinations."))
-    root.addView(twoPane(facilityMapCard(), pointsPanel(), 1.35f, 0.65f))
+    root.addView(pageHero("Facility Map", "Select a verified destination before Nova moves."))
+    root.addView(mapSelectPanel())
+    root.addView(facilityMapCard())
     renderPoints(lastMapPoints, updateStatus = false)
     return root
 }
@@ -527,18 +529,14 @@ internal fun MainActivity.facilityMapCard(): View {
     val pose = runCatching { robot.getRobotPose() }.getOrNull()
     box.addView(FacilityMapView(pose, lastMapPoints, destination(), careRepo.alerts().firstOrNull()?.room).apply {
         layoutParams = full().apply {
-            height = dp(285)
-            topMargin = dp(10)
-            bottomMargin = dp(8)
+            height = dp(235)
+            topMargin = dp(6)
+            bottomMargin = dp(6)
         }
     })
     box.addView(buttonRow(
-        compactStatus("Points", if (lastMapPoints.isEmpty()) "Load map" else "${lastMapPoints.size} saved"),
-        compactStatus("Nova", pose?.let { "${"%.1f".format(it.x)}, ${"%.1f".format(it.y)}" } ?: "Waiting")
-    ))
-    box.addView(buttonRow(
-        compactStatus("Route", activePathText()),
-        compactStatus("Person", lastDetectedPerson)
+        compactStatus("Selected", destination()),
+        compactStatus("Saved Points", if (lastMapPoints.isEmpty()) "Refresh needed" else "${lastMapPoints.size}")
     ))
     box.addView(movementVisualPanel(), full().apply { topMargin = dp(8) })
     return box
@@ -587,6 +585,17 @@ internal fun MainActivity.pointsPanel(): View {
 }
 
 // ── Care panels ───────────────────────────────────────────────────────────────
+
+internal fun MainActivity.mapSelectPanel(): View {
+    val box = card()
+    box.addView(buttonRow(
+        destinationDropdown().also { pointInput = it },
+        actionButton("Refresh", Primary) { loadMapPoints() },
+        actionButton("Guide", Accent) { goToDestination() }
+    ))
+    pointsList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    return box
+}
 
 internal fun MainActivity.careActionsPanel(): View {
     val box = card()
@@ -639,6 +648,37 @@ internal fun MainActivity.careActionTile(title: String, subtitle: String, color:
     return box
 }
 
+internal fun MainActivity.careResidentAccessPanel(): View {
+    val box = card()
+    box.addView(TextView(this).apply {
+        text = "Residents & Room Pins"
+        textSize = 11f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(Text)
+    })
+    box.addView(TextView(this).apply {
+        text = "Resident details stay private on Nova. Open only when needed for check-ins or to confirm a saved room point."
+        textSize = 7f
+        setTextColor(Muted)
+        setPadding(0, dp(2), 0, dp(6))
+    })
+    box.addView(buttonRow(
+        actionButton("View Residents", CareBlue) {
+            AlertDialog.Builder(this@careResidentAccessPanel)
+                .setTitle("Open resident list?")
+                .setMessage("Resident names and room pins are private. Use the cloud dashboard for full editing when possible.")
+                .setPositiveButton("Open") { _, _ -> currentPage = "residents"; setContentView(buildUi()) }
+                .setNegativeButton("Cancel", null)
+                .show()
+        },
+        actionButton("Cloud Manages Pins", Neutral) {
+            speakReply("Please update resident rooms and saved map points from the care cloud dashboard.")
+            setStatus("Resident room pins should be managed from cloud or confirmed before local edits.")
+        }
+    ))
+    return box
+}
+
 internal fun MainActivity.careResidentsPanel(): View {
     val box = card()
     val header = LinearLayout(this).apply {
@@ -653,7 +693,7 @@ internal fun MainActivity.careResidentsPanel(): View {
         setTextColor(Text)
         layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
     })
-    header.addView(actionButton("+ Add", CareBlue) { showResidentEditor(null) }.apply {
+    header.addView(actionButton("+ Add", CareBlue) { confirmResidentPinEdit(null) }.apply {
         layoutParams = LinearLayout.LayoutParams(dp(80), dp(34))
     })
     box.addView(header)
@@ -693,7 +733,7 @@ internal fun MainActivity.residentRowCard(resident: CareResident): View {
         setPadding(0, dp(2), 0, 0)
     })
     row.addView(nameBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-    row.addView(actionButton("Edit", PrimaryDark) { showResidentEditor(resident) }.apply {
+    row.addView(actionButton("Edit", PrimaryDark) { confirmResidentPinEdit(resident) }.apply {
         layoutParams = LinearLayout.LayoutParams(dp(60), dp(34)).also { it.rightMargin = dp(6) }
     })
     row.addView(actionButton("Visit", CareBlue) { careWorkflow.runResidentCheckIn(resident.id) }.apply {
@@ -710,6 +750,15 @@ internal fun MainActivity.residentRowCard(resident: CareResident): View {
         layoutParams = LinearLayout.LayoutParams(dp(44), dp(34))
     })
     return row
+}
+
+internal fun MainActivity.confirmResidentPinEdit(resident: CareResident?) {
+    AlertDialog.Builder(this)
+        .setTitle(if (resident == null) "Add resident locally?" else "Edit resident room pin?")
+        .setMessage("Preferred workflow: update residents and map pins in the cloud dashboard so Nova, phone, and dashboard stay consistent. Continue local edit only if you are confirming a real Nova map point now.")
+        .setPositiveButton("Continue") { _, _ -> showResidentEditor(resident) }
+        .setNegativeButton("Cancel", null)
+        .show()
 }
 
 internal fun MainActivity.showResidentEditor(resident: CareResident?) {
@@ -1110,18 +1159,38 @@ internal fun MainActivity.pageHero(title: String, subtitle: String): View =
         orientation = LinearLayout.VERTICAL
         setPadding(dp(4), dp(1), dp(4), dp(5))
         layoutParams = full()
-        addView(android.widget.TextView(this@pageHero).apply {
-            text = title
-            textSize = 12f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(PrimaryDark)
-        })
+        addView(backHeader(title))
         addView(android.widget.TextView(this@pageHero).apply {
             text = subtitle
             textSize = 8f
             setTextColor(Muted)
             setPadding(0, dp(3), 0, 0)
         })
+    }
+
+internal fun MainActivity.backHeader(title: String): View =
+    LinearLayout(this@backHeader).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        layoutParams = full()
+        if (currentPage != "home") {
+            addView(TextView(this@backHeader).apply {
+                text = "<"
+                textSize = 11f
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                setTextColor(Primary)
+                background = rounded(Color.WHITE, dp(8), Stroke)
+                setPadding(dp(8), dp(4), dp(8), dp(4))
+                setOnClickListener { currentPage = "home"; setContentView(buildUi()) }
+            }, LinearLayout.LayoutParams(dp(34), LinearLayout.LayoutParams.WRAP_CONTENT).also { it.marginEnd = dp(8) })
+        }
+        addView(TextView(this@backHeader).apply {
+            text = title
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(PrimaryDark)
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
     }
 
 internal fun MainActivity.circleIcon(text: String, color: Int, size: Int): View = TextView(this).apply {

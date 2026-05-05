@@ -52,7 +52,7 @@ class CareRepository(context: Context) {
             return seeded
         }
         val array = JSONArray(raw)
-        return List(array.length()) { index ->
+        val parsed = List(array.length()) { index ->
             val item = array.getJSONObject(index)
             CareResident(
                 id = item.getString("id"),
@@ -63,6 +63,15 @@ class CareRepository(context: Context) {
                 checkInPrompt = item.optString("checkInPrompt", "Hello. I am checking in. Do you need anything from staff?")
             )
         }
+        val migrated = parsed.map {
+            if (it.id in setOf("mary", "john", "grace") && it.mapPoint.equals("Reception", ignoreCase = true)) {
+                it.copy(mapPoint = it.room)
+            } else {
+                it
+            }
+        }
+        if (migrated != parsed) saveResidents(migrated)
+        return migrated
     }
 
     fun reminders(): List<CareReminder> {
@@ -190,9 +199,9 @@ class CareRepository(context: Context) {
         prefs.edit().putString("logs", JSONArray().also { array -> items.forEach { array.put(it.toJson()) } }.toString()).apply()
 
     private fun defaultResidents(): List<CareResident> = listOf(
-        CareResident("mary", "Mary Collins", "Room 204", "Reception", "Prefers gentle reminders and short visits.", "Hello Mary. This is Nova checking in. Do you need water, medication help, or staff assistance?"),
-        CareResident("john", "John Ahmed", "Room 207", "Reception", "Family often sends voice messages.", "Hello John. I am here for your check-in. Are you comfortable and do you need anything?"),
-        CareResident("grace", "Grace Lee", "Therapy Lounge", "Reception", "Escort to therapy when requested.", "Hello Grace. It is Nova. Do you need help going to therapy or contacting staff?")
+        CareResident("mary", "Mary Collins", "Room 204", "Room 204", "Prefers gentle reminders and short visits.", "Hello Mary. This is Nova checking in. Do you need water, medication help, or staff assistance?"),
+        CareResident("john", "John Ahmed", "Room 207", "Room 207", "Family often sends voice messages.", "Hello John. I am here for your check-in. Are you comfortable and do you need anything?"),
+        CareResident("grace", "Grace Lee", "Therapy Lounge", "Therapy Lounge", "Escort to therapy when requested.", "Hello Grace. It is Nova. Do you need help going to therapy or contacting staff?")
     )
 
     private fun defaultReminders(): List<CareReminder> = listOf(

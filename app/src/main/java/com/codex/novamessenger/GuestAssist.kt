@@ -144,18 +144,15 @@ class GuestAssist(private val activity: MainActivity) {
             }
             isCareIntent(lower) -> {
                 val resident = findResidentFromSpeech(lower)
-                val fallbackResident = activity.careRepo.residents().firstOrNull()
                 when {
                     lower.contains("medication") || lower.contains("medicine") || lower.contains("appointment") -> {
-                        val targetId = resident?.id ?: fallbackResident?.id
-                        if (targetId == null) activity.speakReply("I do not have a resident registered yet. Please add residents in the care screen or cloud dashboard.")
-                        else activity.careWorkflow.runReminderForResident(targetId)
+                        if (resident == null) activity.speakReply("Which resident should I visit? Please say the resident name or room.")
+                        else activity.careWorkflow.runReminderForResident(resident.id)
                     }
                     lower.contains("round") -> activity.careWorkflow.startCareRound()
                     else -> {
-                        val targetId = resident?.id ?: fallbackResident?.id
-                        if (targetId == null) activity.speakReply("I do not have a resident registered yet. Please add residents before starting check-ins.")
-                        else activity.careWorkflow.runResidentCheckIn(targetId)
+                        if (resident == null) activity.speakReply("Which resident should I check on? Please say the resident name or room.")
+                        else activity.careWorkflow.runResidentCheckIn(resident.id)
                     }
                 }
             }

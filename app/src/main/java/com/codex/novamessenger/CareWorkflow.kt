@@ -35,7 +35,12 @@ class CareWorkflow(private val activity: MainActivity) {
 
     fun runResidentCheckIn(residentId: String?, continueRound: Boolean = false) {
         val resident = activity.careRepo.resident(residentId) ?: return activity.setStatus("Resident not found.")
-        val dest = resolveMapPoint(resident.mapPoint)
+        val dest = resolveResidentMapPoint(resident) ?: return activity.runOnUiThread {
+            activity.setTask("Room pin needed", "Needs setup", resident.room, 0)
+            activity.speakReply("I do not have a verified saved map point for ${resident.name}. Please update the resident room pin from the care cloud before I move.")
+            activity.setStatus("No verified map point for ${resident.name}. Saved pin: ${resident.mapPoint.ifBlank { "none" }}.")
+            if (activity.currentPage == "care" || activity.currentPage == "residents") activity.setContentView(activity.buildUi())
+        }
         activity.runOnUiThread { activity.setDestinationText(dest) }
         activity.setTask("Checking ${resident.name}", "Navigating", "Speak check-in prompt", if (continueRound) 38 else 45)
         activity.careRepo.log("check_in", "Check-in started", "Going to ${resident.name} at ${resident.room}.", resident.id, dest)
@@ -300,10 +305,32 @@ class CareWorkflow(private val activity: MainActivity) {
 
     fun resolveMapPoint(preferred: String): String {
         if (activity.lastMapPoints.isEmpty()) return preferred.ifBlank { "Reception" }
-        return activity.lastMapPoints.firstOrNull { it.name.equals(preferred, ignoreCase = true) }?.name
-            ?: activity.lastMapPoints.firstOrNull { preferred.contains(it.name, ignoreCase = true) || it.name.contains(preferred, ignoreCase = true) }?.name
-            ?: activity.lastMapPoints.firstOrNull { it.name.equals(activity.selectedDestination, ignoreCase = true) }?.name
+        val clean = preferred.trim()
+        return exactMapPoint(clean)?.name
+            ?: fuzzyMapPoint(clean)?.name
+            ?: exactMapPoint(activity.selectedDestination)?.name
             ?: activity.lastMapPoints.first().name
+    }
+
+    fun resolveResidentMapPoint(resident: CareResident): String? {
+        if (activity.lastMapPoints.isEmpty()) return resident.mapPoint.ifBlank { resident.room }.ifBlank { null }
+        val candidates = listOf(resident.mapPoint, resident.room, resident.name)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+        candidates.forEach { exactMapPoint(it)?.let { point -> return point.name } }
+        candidates.forEach { fuzzyMapPoint(it)?.let { point -> return point.name } }
+        return null
+    }
+
+    private fun exactMapPoint(name: String): MapPoint? =
+        activity.lastMapPoints.firstOrNull { it.name.equals(name.trim(), ignoreCase = true) }
+
+    private fun fuzzyMapPoint(name: String): MapPoint? {
+        val clean = name.trim()
+        if (clean.length < 3) return null
+        return activity.lastMapPoints.firstOrNull {
+            clean.contains(it.name, ignoreCase = true) || it.name.contains(clean, ignoreCase = true)
+        }
     }
 
     fun isArrivalStatus(status: String): Boolean {
