@@ -206,8 +206,12 @@ class MessageDelivery(private val activity: MainActivity) {
             refreshMessages()
             activity.setTask("Message delivered", "Completed", message.destination, 100)
             activity.setStatus("Delivered message at ${message.destination}.")
+            activity.completeCloudWorkflow("message", "Message delivery completed at ${message.destination}.")
             activity.handleAfterMission("Message delivery")
-        } else activity.setStatus("Could not play the saved message.")
+        } else {
+            activity.completeCloudWorkflow("message", "Message delivery failed: could not play the saved message.", ok = false)
+            activity.setStatus("Could not play the saved message.")
+        }
     }
 
     fun handleVoiceSendAction(message: String, destinationName: String, senderName: String) {

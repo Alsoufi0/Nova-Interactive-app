@@ -327,7 +327,7 @@ internal fun MainActivity.homeFeatureCard(title: String, subtitle: String, badge
 
 internal fun MainActivity.messagePage(): View {
     val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    root.addView(pageHero("Message Delivery", "Record, save, and send a visitor message to a saved map point."))
+    root.addView(pageHero("Visitor Message", "Capture a message, choose the care desk or room, and let Nova deliver it."))
     root.addView(twoPane(workflowCard(), messageQueuePanel(), 1.05f, 1f))
     messageDelivery.refreshMessages()
     return root
@@ -353,7 +353,7 @@ internal fun MainActivity.destinationsPage(): View {
 
 internal fun MainActivity.robotPage(): View {
     val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    root.addView(pageHero("Robot & Settings", "Follow mode, timing, home base, and cloud configuration."))
+    root.addView(pageHero("Care Operations", "Follow assistance, task timing, home base, and cloud connection."))
     root.addView(followProfilePanel())
     root.addView(followActionsCard())
     root.addView(settingsPanel())
@@ -362,10 +362,10 @@ internal fun MainActivity.robotPage(): View {
 
 internal fun MainActivity.cameraPage(): View {
     val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    root.addView(pageHero("Camera", "Live camera feed, person detection, and security scanning."))
+    root.addView(pageHero("Safety View", "Live camera, person detection, and after-hours monitoring."))
     val panel = card()
     panel.addView(TextView(this).apply {
-        text = "Detection Camera"
+        text = "Live Camera"
         textSize = 18f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Text)
@@ -381,16 +381,16 @@ internal fun MainActivity.cameraPage(): View {
 internal fun MainActivity.cameraActionsCard(): View {
     val panel = card()
     panel.addView(TextView(this).apply {
-        text = "Detection Controls"
+        text = "Safety Controls"
         textSize = 16f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Text)
     })
-    val openCameraButton = actionButton("Open Camera", Primary) { startCameraFeed() }
-    val closeCameraButton = actionButton("Close Camera", Neutral) { stopCameraFeed() }
-    val startWatchButton = actionButton("Start Watch", Accent) { startSecurityWatch() }
-    val stopWatchButton = actionButton("Stop Watch", Danger) { stopSecurityWatch() }
-    val scanButton = actionButton("Scan Now", PrimaryDark) { observeSecurity() }
+    val openCameraButton = actionButton("Start View", Primary) { startCameraFeed() }
+    val closeCameraButton = actionButton("Close View", Neutral) { stopCameraFeed() }
+    val startWatchButton = actionButton("Begin Watch", Accent) { startSecurityWatch() }
+    val stopWatchButton = actionButton("End Watch", Danger) { stopSecurityWatch() }
+    val scanButton = actionButton("Check Area", PrimaryDark) { observeSecurity() }
     scanButton.layoutParams = full().apply { topMargin = dp(8) }
     panel.addView(buttonRow(openCameraButton, closeCameraButton))
     panel.addView(buttonRow(startWatchButton, stopWatchButton))
@@ -441,7 +441,7 @@ internal fun MainActivity.detectionOverlayCard(): View {
 internal fun MainActivity.messageQueuePanel(): View {
     val box = card()
     box.addView(TextView(this).apply {
-        text = "Delivery Queue"
+        text = "Message History"
         textSize = 16f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Text)
@@ -474,14 +474,14 @@ internal fun MainActivity.workflowCard(): View {
     card.addView(label("Message"))
     card.addView(messageInput, full())
     card.addView(buttonRow(
-        actionButton("Record", Primary) { messageDelivery.askAndRecord() },
-        actionButton("Stop + Save", Warning) { messageDelivery.stopRecordingAndSave() }
+        actionButton("Record Message", Primary) { messageDelivery.askAndRecord() },
+        actionButton("Save Recording", Warning) { messageDelivery.stopRecordingAndSave() }
     ))
     card.addView(buttonRow(
-        actionButton("Save Text", Neutral) { messageDelivery.saveTextOnlyMessage() },
-        actionButton("Speak", PrimaryDark) { messageDelivery.speakCurrentMessage() }
+        actionButton("Save Note", Neutral) { messageDelivery.saveTextOnlyMessage() },
+        actionButton("Preview Voice", PrimaryDark) { messageDelivery.speakCurrentMessage() }
     ))
-    card.addView(actionButton("Send Now  →  ${destination()}", Accent) {
+    card.addView(actionButton("Deliver to ${destination()}", Accent) {
         messageDelivery.sendCurrentMessageToPoint()
     }.apply {
         textSize = 14f
@@ -949,7 +949,7 @@ internal fun MainActivity.settingsPanel(): View {
         layoutParams = full().apply { bottomMargin = dp(4) }
     }
     missionBox.addView(TextView(this).apply {
-        text = "Mission Behavior"
+        text = "After Visit"
         textSize = 16f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(PrimaryDark)
@@ -1000,7 +1000,7 @@ internal fun MainActivity.settingsPanel(): View {
 
     // ── Timing ────────────────────────────────────────────────────────────────
     box.addView(TextView(this).apply {
-        text = "Timing Settings"
+        text = "Care Timing"
         textSize = 15f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Text)
@@ -1042,7 +1042,7 @@ internal fun MainActivity.settingsPanel(): View {
 
     // ── Cloud ─────────────────────────────────────────────────────────────────
     box.addView(TextView(this).apply {
-        text = "Cloud Connection"
+        text = "Care Cloud"
         textSize = 15f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Text)
@@ -1147,9 +1147,20 @@ internal fun MainActivity.header(): View {
     top.addView(queueBadge, LinearLayout.LayoutParams(
         LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
     ).also { it.marginStart = dp(4) })
-    top.addView(recordingBadge, LinearLayout.LayoutParams(
-        LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
-    ).also { it.marginStart = dp(4) })
+    top.addView(TextView(this).apply {
+        text = "STOP"
+        textSize = 12f
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        setTextColor(Color.WHITE)
+        background = rounded(Danger, dp(10), 0)
+        setPadding(dp(18), dp(9), dp(18), dp(9))
+        isClickable = true
+        isFocusable = true
+        setOnClickListener { stopAll(); setContentView(buildUi()) }
+    }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).also {
+        it.marginStart = dp(8)
+    })
     box.addView(top)
     statusView = TextView(this).apply {
         text = "Unit 01  |  ${if (robot.isRobotSdkAvailable) "Online" else "Preview"}  |  ${lastBattery.replace("Battery ", "")}  |  ${SimpleDateFormat("MMM d, h:mm a", Locale.US).format(Date())}"

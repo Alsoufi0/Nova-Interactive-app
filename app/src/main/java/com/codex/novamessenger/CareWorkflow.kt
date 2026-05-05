@@ -22,8 +22,8 @@ class CareWorkflow(private val activity: MainActivity) {
         }.start()
     }
 
-    fun startCareRound() {
-        val residents = activity.careRepo.residents()
+    fun startCareRound(residentsOverride: List<CareResident>? = null) {
+        val residents = residentsOverride?.takeIf { it.isNotEmpty() } ?: activity.careRepo.residents()
         val first = residents.firstOrNull() ?: return activity.setStatus("No residents are configured.")
         activity.activeRoundIds = residents.map { it.id }
         activity.activeRoundIndex = 0
@@ -53,6 +53,7 @@ class CareWorkflow(private val activity: MainActivity) {
                     scheduleNextRoundStop(resident)
                 } else {
                     activity.setTask("Check-in completed", "Completed", resident.room, 100)
+                    activity.completeCloudWorkflow("resident_checkin", "Check-in completed for ${resident.name}.", resident.id)
                     activity.handleAfterMission("Check-in for ${resident.name}")
                 }
                 if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
@@ -92,6 +93,7 @@ class CareWorkflow(private val activity: MainActivity) {
                 activity.setTask("Care round completed", "Completed", "All residents checked", 100)
                 activity.careRepo.log("round", "Care round completed", "All queued residents checked.", resident.id, resident.mapPoint)
                 activity.speakReply("Care round completed. All residents have been checked. Have a wonderful day.")
+                activity.completeCloudWorkflow("start_rounds", "Care round completed.")
                 activity.handleAfterMission("Care round")
                 if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
             } else {
@@ -107,7 +109,7 @@ class CareWorkflow(private val activity: MainActivity) {
         }, waitMs)
     }
 
-    fun runExternalResidentCheckIn(residentId: String, name: String, room: String, mapPoint: String, notes: String) {
+    fun runExternalResidentCheckIn(residentId: String, name: String, room: String, mapPoint: String, notes: String, cloudAction: String = "resident_checkin") {
         val dest = resolveMapPoint(mapPoint.ifBlank { room.ifBlank { activity.destination() } })
         val displayName = name.ifBlank { "the resident" }
         val displayRoom = room.ifBlank { dest }
@@ -129,6 +131,7 @@ class CareWorkflow(private val activity: MainActivity) {
                 activity.speakReply(prompt)
                 activity.careRepo.log("check_in", "Cloud check-in delivered", prompt, residentId.ifBlank { null }, dest)
                 activity.setTask("Check-in completed", "Completed", displayRoom, 100)
+                activity.completeCloudWorkflow(cloudAction, "${if (cloudAction == "med_reminder") "Medication reminder" else "Check-in"} completed for $displayName.", residentId)
                 activity.handleAfterMission("Check-in for $displayName")
                 if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
             }
@@ -177,6 +180,7 @@ class CareWorkflow(private val activity: MainActivity) {
                 activity.careRepo.completeReminder(reminder.id)
                 activity.careRepo.log("reminder", "Reminder delivered", reminder.message, reminder.residentId, dest)
                 activity.setTask("Reminder completed", "Completed", resident?.room ?: dest, 100)
+                activity.completeCloudWorkflow("med_reminder", "Medication reminder completed.", reminder.residentId)
                 activity.handleAfterMission("Medication reminder")
                 if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
             }
@@ -223,6 +227,7 @@ class CareWorkflow(private val activity: MainActivity) {
                 activity.runOnUiThread {
                     activity.setTask("Staff alert", "Speaking", "Waiting for staff", 85)
                     activity.speakReply(speakMessage)
+                    activity.completeCloudWorkflow("staff_alert", "Staff alert delivered at $resolvedRoom.")
                     scheduleAlertReturn()
                 }
             }
@@ -243,6 +248,7 @@ class CareWorkflow(private val activity: MainActivity) {
         } else {
             activity.runOnUiThread {
                 activity.speakReply(speakMessage)
+                activity.completeCloudWorkflow("staff_alert", "Staff alert delivered at $resolvedRoom.")
                 scheduleAlertReturn()
             }
         }
@@ -270,14 +276,16 @@ class CareWorkflow(private val activity: MainActivity) {
                     if (!handled.compareAndSet(false, true)) return@startNavigation
                     activity.runOnUiThread {
                         activity.setTask("Visitor guide", "Arrived", dest, 90)
-                        activity.speakReply("We have arrived at $dest. Have a great day.")
-                        activity.handleAfterMission("Visitor guide")
-                    }
+                    activity.speakReply("We have arrived at $dest. Have a great day.")
+                    activity.completeCloudWorkflow("visitor_guide", "Visitor guide completed at $dest.")
+                    activity.handleAfterMission("Visitor guide")
+                }
                 }
                 lower.contains("error") || lower.contains("fail") -> {
                     if (!handled.compareAndSet(false, true)) return@startNavigation
                     activity.runOnUiThread {
                         activity.speakReply("I was unable to navigate to $dest. I apologize for the inconvenience.")
+                        activity.completeCloudWorkflow("visitor_guide", "Visitor guide failed before arriving at $dest.", ok = false)
                         activity.handleAfterMission("Visitor guide")
                     }
                 }
@@ -285,6 +293,7 @@ class CareWorkflow(private val activity: MainActivity) {
         }
         if (!result.ok) {
             activity.speakReply("Navigation is not available. $dest is this way.")
+            activity.completeCloudWorkflow("visitor_guide", "Visitor guide failed: ${result.message}", ok = false)
             activity.handleAfterMission("Visitor guide")
         }
     }

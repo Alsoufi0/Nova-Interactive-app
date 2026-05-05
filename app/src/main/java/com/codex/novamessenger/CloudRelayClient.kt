@@ -70,7 +70,7 @@ class CloudRelayClient(
                 )
                 val result = commandHandler(command)
                 runCatching {
-                    postJson("$base/robot/result", commandResultJson(command, result), token)
+                    postJson("$base/robot/result", commandResultJson(command, result, acceptedOnly = result.startsWith("accepted", ignoreCase = true)), token)
                 }.onFailure {
                     pendingResults.offer(PendingCommandResult(command, result))
                     Log.w(TAG, "Result for command ${command.id} queued for retry: ${it.message}")
@@ -90,20 +90,35 @@ class CloudRelayClient(
         while (iterator.hasNext()) {
             val pending = iterator.next()
             val sent = runCatching {
-                postJson("$base/robot/result", commandResultJson(pending.command, pending.result), token)
+                postJson("$base/robot/result", commandResultJson(pending.command, pending.result, acceptedOnly = pending.result.startsWith("accepted", ignoreCase = true)), token)
                 iterator.remove()
             }.isSuccess
             if (!sent) break
         }
     }
 
-    private fun commandResultJson(command: CloudCommand, result: String): JSONObject =
+    fun reportCommandResult(command: CloudCommand, result: String, ok: Boolean = true) {
+        val base = cloudUrlProvider().trim().trimEnd('/')
+        val token = tokenProvider().trim()
+        if (base.isBlank() || token.isBlank()) return
+        Thread {
+            runCatching {
+                postJson("$base/robot/result", commandResultJson(command, result, ok = ok), token)
+            }.onFailure {
+                pendingResults.offer(PendingCommandResult(command, result))
+                Log.w(TAG, "Completion for command ${command.id} queued for retry: ${it.message}")
+            }
+        }.start()
+    }
+
+    private fun commandResultJson(command: CloudCommand, result: String, ok: Boolean = true, acceptedOnly: Boolean = false): JSONObject =
         JSONObject()
             .put("id", command.id)
             .put("action", command.action)
             .put("params", command.rawParams)
             .put("result", result)
-            .put("ok", !result.contains("failed", ignoreCase = true) && !result.contains("unknown", ignoreCase = true))
+            .put("ok", ok && !acceptedOnly && !result.contains("failed", ignoreCase = true) && !result.contains("unknown", ignoreCase = true))
+            .put("status", if (acceptedOnly) "accepted" else if (ok) "completed" else "failed")
             .put("completedAt", System.currentTimeMillis())
 
     private fun getJson(url: String, token: String): JSONObject {

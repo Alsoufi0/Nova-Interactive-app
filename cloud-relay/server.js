@@ -1334,8 +1334,9 @@ const server = http.createServer(async (req, res) => {
       const record = { id: cleanText(data.id) || crypto.randomUUID(), action, params: p, result, ok: data.ok !== false, at: completedAt };
       commandResults.unshift(record);
       if (commandResults.length > 200) commandResults.pop();
-      if (action === "resident_checkin" && p.residentId) { facility.checkIns[p.residentId] = Date.now(); persistData(); }
-      if (action === "start_rounds" && Array.isArray(p.residents)) {
+      const completed = record.ok && /complete|completed|delivered|arrived|done|finished/i.test(result);
+      if (completed && action === "resident_checkin" && p.residentId) { facility.checkIns[p.residentId] = Date.now(); persistData(); }
+      if (completed && action === "start_rounds" && Array.isArray(p.residents)) {
         p.residents.forEach(function(r) { if (r.id) facility.checkIns[r.id] = Date.now(); });
         roundHistory.unshift({ id: crypto.randomUUID(), name: p.scheduleName || "Manual Round", type: p.type || "checkin", trigger: p.scheduleName ? "schedule" : "manual", count: p.residents.length, at: Date.now() });
         if (roundHistory.length > 30) roundHistory.pop();

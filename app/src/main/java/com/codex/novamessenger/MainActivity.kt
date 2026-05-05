@@ -33,12 +33,14 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 
 class MainActivity : Activity() {
@@ -53,6 +55,7 @@ class MainActivity : Activity() {
     internal lateinit var careRepo: CareRepository
 
     private val visionManager = VisionManager()
+    private val pendingCloudCommands = ConcurrentHashMap<String, CloudRelayClient.CloudCommand>()
 
     internal lateinit var statusView: TextView
     internal lateinit var sdkBadge: TextView
@@ -261,7 +264,7 @@ class MainActivity : Activity() {
             background = rounded(Color.argb(248, 235, 242, 243), 0)
             setPadding(dp(8), dp(6), dp(8), 0)
             addView(header())
-            addView(emergencyStopBar())
+            if (safetyStopStatus.contains("Stopped")) addView(emergencyStopBar())
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
 
         val scroll = ScrollView(this).apply {
@@ -681,8 +684,47 @@ class MainActivity : Activity() {
     }
 
     private fun handleCloudCommand(command: CloudRelayClient.CloudCommand): String {
+        if (command.id.isNotBlank()) pendingCloudCommands[command.id] = command
+        if (command.action == "start_rounds") {
+            val cloudResidents = command.rawParams.optJSONArray("residents")?.toCareResidents().orEmpty()
+            cloudResidents.forEach { careRepo.upsertResident(it) }
+            runOnUiThread {
+                if (cloudResidents.isNotEmpty()) careWorkflow.startCareRound(cloudResidents)
+                else careWorkflow.startCareRound()
+                setContentView(buildUi())
+            }
+            return "accepted: start_rounds"
+        }
         handleRemoteCommand(RemoteControlServer.RemoteCommand(command.action, command.params))
-        return "Cloud command sent: ${command.action}"
+        return "accepted: ${command.action}"
+    }
+
+    private fun JSONArray.toCareResidents(): List<CareResident> =
+        List(length()) { index -> optJSONObject(index) }
+            .filterNotNull()
+            .mapNotNull { item ->
+                val id = item.optString("id").ifBlank { "cloud_res_${System.currentTimeMillis()}" }
+                val name = item.optString("name").ifBlank { item.optString("residentName") }
+                val room = item.optString("room")
+                if (name.isBlank() && room.isBlank()) null else CareResident(
+                    id = id,
+                    name = name.ifBlank { "Resident $room" },
+                    room = room,
+                    mapPoint = item.optString("mapPoint").ifBlank { room.ifBlank { destination() } },
+                    notes = item.optString("notes"),
+                    checkInPrompt = item.optString("checkInPrompt").ifBlank {
+                        "Hello ${name.ifBlank { "there" }}. I am checking in. Do you need anything?"
+                    }
+                )
+            }
+
+    internal fun completeCloudWorkflow(action: String, result: String, residentId: String? = null, ok: Boolean = true) {
+        val match = pendingCloudCommands.entries.firstOrNull { entry ->
+            val command = entry.value
+            command.action == action && (residentId.isNullOrBlank() || command.params["residentId"].orEmpty() == residentId)
+        } ?: return
+        pendingCloudCommands.remove(match.key)
+        cloudRelay.reportCommandResult(match.value, result, ok)
     }
 
     private fun handleRemoteCommand(command: RemoteControlServer.RemoteCommand): String {
@@ -743,7 +785,8 @@ class MainActivity : Activity() {
                             residentName,
                             command.params["room"].orEmpty(),
                             command.params["mapPoint"].orEmpty(),
-                            command.params["notes"].orEmpty().ifBlank { "Medication reminder requested from the care cloud." }
+                            command.params["notes"].orEmpty().ifBlank { "Medication reminder requested from the care cloud." },
+                            cloudAction = "med_reminder"
                         )
                     } else careWorkflow.runReminderForResident(command.params["residentId"].orEmpty())
                 }
@@ -832,11 +875,15 @@ class MainActivity : Activity() {
     }
 
     internal fun handleAfterMission(taskName: String) {
+        val waitMs = (vm.roundWaitSeconds * 1_000L).coerceAtLeast(3_000L)
         when (vm.afterMissionBehavior) {
-            "home_base" -> returnToHomeBase()
+            "home_base" -> {
+                setStatus("$taskName complete. Waiting ${vm.roundWaitSeconds}s before returning to ${vm.homeBase}.")
+                Handler(Looper.getMainLooper()).postDelayed({ returnToHomeBase() }, waitMs)
+            }
             "charge" -> {
-                speakReply("$taskName complete. Going to charge.")
-                setStatus(robot.goCharge().message)
+                speakReply("$taskName complete. I will wait ${vm.roundWaitSeconds} seconds, then go to charge.")
+                Handler(Looper.getMainLooper()).postDelayed({ setStatus(robot.goCharge().message) }, waitMs)
             }
             "ask" -> speakReply("$taskName complete. I am standing by. Say return to base, go charge, or I will stay here.")
             else -> {} // "stay" — no movement
