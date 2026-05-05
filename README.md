@@ -108,6 +108,13 @@ AI_BASE_URL=https://api.openai.com/v1/chat/completions
 
 When configured, Nova sends the recognized phrase plus current map points/residents to `/ai/intent`. The cloud returns one approved action, such as `send_message`, `guide`, `staff_alert`, `resident_checkin`, `follow_start`, `follow_stop`, `camera_start`, `security_start`, `stop`, or `capabilities`. If the model is not configured or fails, Nova automatically falls back to the local rule-based intent parser.
 
+Patient privacy rule:
+
+- If a visitor asks whether an exact resident/patient name is present, Nova may only confirm that the person is registered here.
+- Nova must not reveal a room, care note, schedule, or map destination to a visitor.
+- To guide a visitor to a resident, the cloud Planned Visits record must include the visitor name, visitor ID number, resident, and resident map point. Nova asks the visitor to say their full name and ID, verifies it through the cloud, logs the visit, and only then starts navigation.
+- Failed verification does not expose the room and creates a staff alert.
+
 1. Open the Care tab on Nova or the cloud relay on your phone.
 2. Use Start Check-In Round for resident rounds.
 3. Use Staff Alert for urgent help requests.

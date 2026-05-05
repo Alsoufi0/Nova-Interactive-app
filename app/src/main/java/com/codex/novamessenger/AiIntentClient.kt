@@ -14,7 +14,8 @@ data class AiIntentResult(
     val residentName: String?,
     val message: String?,
     val priority: String?,
-    val reply: String?
+    val reply: String?,
+    val patientAccess: Boolean
 )
 
 class AiIntentClient(private val activity: MainActivity) {
@@ -46,8 +47,6 @@ class AiIntentClient(private val activity: MainActivity) {
                                 JSONObject()
                                     .put("id", resident.id)
                                     .put("name", resident.name)
-                                    .put("room", resident.room)
-                                    .put("mapPoint", resident.mapPoint)
                             )
                         }
                     })
@@ -85,7 +84,8 @@ class AiIntentClient(private val activity: MainActivity) {
             residentName = json.optString("residentName").takeIf { it.isNotBlank() },
             message = json.optString("message").takeIf { it.isNotBlank() },
             priority = json.optString("priority").takeIf { it.isNotBlank() },
-            reply = json.optString("reply").takeIf { it.isNotBlank() }
+            reply = json.optString("reply").takeIf { it.isNotBlank() },
+            patientAccess = json.optBoolean("patientAccess", false)
         )
     }
 }

@@ -26,7 +26,7 @@ class NovaConciergeApplication : Application() {
                     "Brief, warm, polite, clear, and safety-aware. Confirm what you are doing, avoid long explanations, and never start robot movement unless the person clearly asks for guide or follow."
                 )
                 setObjective(
-                    "Understand natural requests in many wordings. If someone asks what you do, explain your care concierge abilities. If someone asks to send, record, leave, tell, notify, or deliver a message, use the message action. If someone asks for help, nurse, urgent, emergency, fall, pain, or staff, use staff alert. If someone asks to take, guide, show, navigate, or help them get somewhere, use visitor guide. If someone asks for check-in, rounds, resident, medication, medicine, or reminder, use care workflow. If someone asks to follow or come with them, use follow. If someone asks about camera, scan, detection, watch, security, or surveillance, use camera detection."
+                    "Understand natural requests in many wordings. If someone asks what you do, explain your care concierge abilities. If someone asks to send, record, leave, tell, notify, or deliver a message, use the message action. If someone asks for help, nurse, urgent, emergency, fall, pain, or staff, use staff alert. If someone asks to take, guide, show, navigate, or help them get to a public saved place, use visitor guide. If someone asks to visit, find, see, or be guided to a patient or resident by name, pass the phrase to the app and do not reveal room information. If someone asks for staff care check-in, rounds, resident check-in, medication, medicine, or reminder, use care workflow. If someone asks to follow or come with them, use follow. If someone asks about camera, scan, detection, watch, security, or surveillance, use camera detection."
                 )
                 registerAction(Actions.SAY)
                 registerAction(sendMessageAction())
@@ -119,7 +119,7 @@ class NovaConciergeApplication : Application() {
         phraseAction(
             name = VISITOR_GUIDE_ACTION,
             displayName = "Guide visitor",
-            desc = "Use when someone asks Nova to guide, take, show, navigate, escort, or help them get to a destination, saved map point, room, reception, office, lobby, entrance, or conference room.",
+            desc = "Use when someone asks Nova to guide, take, show, navigate, escort, or help them get to a public destination, saved map point, reception, office, lobby, entrance, or conference room. Do not use this to reveal or navigate to a patient/resident room for a visitor.",
             parameters = listOf(
                 Parameter("destination", ParameterType.STRING, "Destination, room, or saved map point requested by the user.", false)
             )

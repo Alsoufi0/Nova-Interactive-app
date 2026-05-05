@@ -25,6 +25,8 @@ class NovaViewModel {
     var activeRoundIndex = -1
     var voiceListening = false
     @Volatile var aiUnderstandingEnabled = true
+    var pendingVisitResidentId = ""
+    var pendingVisitResidentName = ""
 
     // Operator-configurable timing settings
     @Volatile var roundWaitSeconds = 22

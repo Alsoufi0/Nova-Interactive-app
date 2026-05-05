@@ -77,6 +77,7 @@ class MainActivity : Activity() {
     internal lateinit var messageDelivery: MessageDelivery
     internal lateinit var guestAssist: GuestAssist
     internal lateinit var aiIntentClient: AiIntentClient
+    internal lateinit var visitAuthorizationClient: VisitAuthorizationClient
 
     // State delegated to ViewModel
     internal var lastStatus: String get() = vm.lastStatus; set(v) { vm.lastStatus = v }
@@ -103,6 +104,8 @@ class MainActivity : Activity() {
     internal var activeRoundIndex: Int get() = vm.activeRoundIndex; set(v) { vm.activeRoundIndex = v }
     internal var voiceListening: Boolean get() = vm.voiceListening; set(v) { vm.voiceListening = v }
     internal var aiUnderstandingEnabled: Boolean get() = vm.aiUnderstandingEnabled; set(v) { vm.aiUnderstandingEnabled = v }
+    internal var pendingVisitResidentId: String get() = vm.pendingVisitResidentId; set(v) { vm.pendingVisitResidentId = v }
+    internal var pendingVisitResidentName: String get() = vm.pendingVisitResidentName; set(v) { vm.pendingVisitResidentName = v }
     internal val assistHandler = Handler(Looper.getMainLooper())
     private val securityHandler = Handler(Looper.getMainLooper())
     private val mapHandler = Handler(Looper.getMainLooper())
@@ -187,6 +190,7 @@ class MainActivity : Activity() {
         messageDelivery = MessageDelivery(this)
         guestAssist = GuestAssist(this)
         aiIntentClient = AiIntentClient(this)
+        visitAuthorizationClient = VisitAuthorizationClient(this)
         remoteServer = RemoteControlServer(
             username = prefs.getString("remote_username", "admin") ?: "admin",
             password = localServerPassword(),

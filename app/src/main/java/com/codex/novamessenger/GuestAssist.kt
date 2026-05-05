@@ -127,6 +127,7 @@ class GuestAssist(private val activity: MainActivity) {
 
     fun handleGuestIntent(phrase: String) {
         activity.setStatus("Heard: $phrase")
+        if (activity.pendingVisitResidentId.isNotBlank() && handlePendingVisitVerification(phrase)) return
         activity.aiIntentClient.classify(phrase) { ai ->
             activity.runOnUiThread {
                 val handled = ai != null && handleAiIntent(phrase, ai)
@@ -174,6 +175,10 @@ class GuestAssist(private val activity: MainActivity) {
                 activity.startFollowMode()
             }
             isGuideIntent(lower) -> {
+                if (isPrivateRoomRequest(lower)) {
+                    activity.speakReply("For privacy, I cannot guide visitors to resident rooms unless a planned visit is verified. Please ask for the resident by full name so I can verify the visit.")
+                    return
+                }
                 val point = inferDestination(lower) ?: inferDestinationFromWords(lower)
                 if (point != null) activity.setDestinationText(point) else inferRoom(lower)?.let { activity.setDestinationText(it) }
                 activity.speakReply("I will guide you to ${activity.destination()}.")
@@ -221,10 +226,36 @@ class GuestAssist(private val activity: MainActivity) {
                 true
             }
             "guide" -> {
+                resolveAiResident(ai, lower)?.let {
+                    startPrivatePatientAccess(it)
+                    return true
+                }
+                if (isPrivateRoomRequest(lower)) {
+                    activity.speakReply("For privacy, I cannot guide visitors to resident rooms unless a planned visit is verified. Please ask for the resident by full name so I can verify the visit.")
+                    return true
+                }
                 val destination = resolveAiDestination(ai, lower) ?: return false
                 activity.setDestinationText(destination)
                 activity.speakReply(ai.reply ?: "I will guide you to $destination.")
                 activity.goToDestination()
+                true
+            }
+            "patient_lookup" -> {
+                val resident = resolveAiResident(ai, lower)
+                if (resident == null) {
+                    activity.speakReply("I cannot confirm that person here.")
+                } else {
+                    activity.speakReply("${resident.name} is registered here. For privacy, I cannot share a room or guide you unless your planned visit is verified.")
+                }
+                true
+            }
+            "patient_visit" -> {
+                val resident = resolveAiResident(ai, lower)
+                if (resident == null) {
+                    activity.speakReply("I cannot confirm that person here. Please check with reception.")
+                } else {
+                    startPrivatePatientAccess(resident)
+                }
                 true
             }
             "resident_checkin" -> {
@@ -276,6 +307,76 @@ class GuestAssist(private val activity: MainActivity) {
         }
     }
 
+    private fun startPrivatePatientAccess(resident: CareResident) {
+        activity.pendingVisitResidentId = resident.id
+        activity.pendingVisitResidentName = resident.name
+        activity.setTask("Visitor verification", "Privacy check", resident.name, 15)
+        activity.speakReply("${resident.name} is registered here. For privacy, please say your full visitor name and ID number so I can verify your planned visit.")
+    }
+
+    private fun handlePendingVisitVerification(phrase: String): Boolean {
+        val resident = activity.careRepo.residents().firstOrNull { it.id == activity.pendingVisitResidentId } ?: run {
+            clearPendingVisit()
+            return false
+        }
+        val visitorId = extractVisitorId(phrase)
+        val visitorName = extractVisitorName(phrase, visitorId)
+        if (visitorName.isBlank() || visitorId.isBlank()) {
+            activity.speakReply("Please say your full visitor name and ID number together. For example, my name is Alex Smith and my ID is 1234.")
+            return true
+        }
+        activity.setTask("Visitor verification", "Checking cloud", resident.name, 35)
+        activity.setStatus("Verifying planned visit for ${resident.name}...")
+        activity.visitAuthorizationClient.verify(visitorName, visitorId, resident) { result ->
+            activity.runOnUiThread {
+                if (result.ok) {
+                    clearPendingVisit()
+                    val destination = activity.careWorkflow.resolveVerifiedMapPoint(result.mapPoint)
+                    if (destination == null) {
+                        activity.speakReply("Your visit is verified, but I do not have a verified saved route for that destination. Reception can help you.")
+                        activity.setTask("Route unavailable", "Needs map point", result.residentName, 0)
+                    } else {
+                        activity.setDestinationText(destination)
+                        activity.setTask("Verified visit", "Navigating", "Guide visitor", 45)
+                        activity.speakReply("Thank you. Your visit is verified. Please follow me.")
+                        activity.goToDestination()
+                    }
+                } else {
+                    clearPendingVisit()
+                    activity.speakReply(result.message.ifBlank { "I could not verify your planned visit. I cannot share room information. I will notify staff." })
+                    activity.careWorkflow.createStaffAlert("normal", "", "Visitor could not be verified for ${resident.name}.")
+                    activity.setTask("Verification failed", "Staff notified", "Await staff", 0)
+                }
+                if (activity.currentPage == "care") activity.setContentView(activity.buildUi())
+            }
+        }
+        return true
+    }
+
+    private fun clearPendingVisit() {
+        activity.pendingVisitResidentId = ""
+        activity.pendingVisitResidentName = ""
+    }
+
+    private fun extractVisitorId(phrase: String): String =
+        Regex("""(?i)\b(?:id|i\s*d|number|code)\s*(?:is|number is|:)?\s*([a-z0-9-]{3,24})\b""")
+            .find(phrase)
+            ?.groupValues
+            ?.getOrNull(1)
+            .orEmpty()
+
+    private fun extractVisitorName(phrase: String, visitorId: String): String {
+        val beforeId = if (visitorId.isNotBlank()) phrase.substringBefore(visitorId) else phrase
+        val match = Regex("""(?i)\b(?:my name is|name is|i am|i'm|this is)\s+([a-z][a-z .'-]{1,80})""")
+            .find(beforeId)
+            ?.groupValues
+            ?.getOrNull(1)
+            .orEmpty()
+        return match
+            .replace(Regex("""(?i)\b(and|with|my|id|number|code|is)\b.*$"""), "")
+            .trim(' ', ',', '.', ';', ':')
+    }
+
     private fun resolveAiDestination(ai: AiIntentResult, lowerPhrase: String): String? {
         val requested = ai.destination
             ?: inferDestination(lowerPhrase)
@@ -306,6 +407,9 @@ class GuestAssist(private val activity: MainActivity) {
 
     private fun isUrgent(lower: String): Boolean =
         listOf("urgent", "emergency", "fall", "fell", "pain", "can't breathe", "cannot breathe").any { lower.contains(it) }
+
+    private fun isPrivateRoomRequest(lower: String): Boolean =
+        Regex("""\b(room|suite|bed)\s*[a-z]?\d{1,4}[a-z]?\b""").containsMatchIn(lower)
 
     private fun inferDestination(lowerPhrase: String): String? {
         val known = activity.lastMapPoints.map { it.name }.ifEmpty {

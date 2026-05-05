@@ -180,6 +180,14 @@ function stableId(prefix, value) {
   const base = cleanText(value) || crypto.randomUUID();
   return `${prefix}-${crypto.createHash("sha1").update(base).digest("hex").slice(0, 10)}`;
 }
+function visitorIdHash(value) {
+  const clean = cleanText(value).toLowerCase().replace(/\s+/g, "");
+  if (!clean) return "";
+  return crypto.createHmac("sha256", SESSION_SECRET).update(clean).digest("hex");
+}
+function visitorIdLast4(value) {
+  return cleanText(value).replace(/\s+/g, "").slice(-4);
+}
 function parseCsv(text) {
   const rows = []; let row = [], cell = "", quoted = false;
   for (let i = 0; i < text.length; i++) {
@@ -225,7 +233,7 @@ function mergedCare() {
 const AI_ALLOWED_ACTIONS = new Set([
   "send_message", "guide", "staff_alert", "resident_checkin", "med_reminder",
   "start_rounds", "follow_start", "follow_stop", "camera_start", "security_start",
-  "stop", "capabilities", "unknown"
+  "patient_lookup", "patient_visit", "stop", "capabilities", "unknown"
 ]);
 
 function safeAiString(value, max = 500) {
@@ -257,6 +265,7 @@ function normalizeAiIntent(parsed) {
     message: safeAiString(parsed && parsed.message, 500),
     priority: ["normal", "urgent"].includes(priority) ? priority : "normal",
     reply: safeAiString(parsed && parsed.reply, 500),
+    patientAccess: !!(parsed && parsed.patientAccess),
   };
 }
 function buildAiPrompt(body) {
@@ -276,12 +285,15 @@ function buildAiPrompt(body) {
       content: [
         "You classify spoken requests for Nova, a healthcare and elder-care concierge robot.",
         "Return only compact JSON. Do not include markdown.",
-        "Allowed actions: send_message, guide, staff_alert, resident_checkin, med_reminder, start_rounds, follow_start, follow_stop, camera_start, security_start, stop, capabilities, unknown.",
-        "Use known map points and residents only. Do not invent destinations or resident IDs.",
+        "Allowed actions: send_message, guide, staff_alert, resident_checkin, med_reminder, start_rounds, follow_start, follow_stop, camera_start, security_start, patient_lookup, patient_visit, stop, capabilities, unknown.",
+        "Use known public map points and resident names only. Do not invent destinations or resident IDs.",
+        "For patient/resident privacy: if a visitor asks whether an exact resident name is here, use patient_lookup and only identify residentId/residentName. Never output room or destination for a patient.",
+        "If a visitor asks to see, visit, find, or be guided to a resident/patient by name, use patient_visit and only identify residentId/residentName. Do not output room/destination.",
+        "Only care staff commands such as resident check-in, rounds, or medication reminders may use resident_checkin or med_reminder.",
         "If destination or resident is unclear, action unknown and reply with one short clarifying question.",
         "For send_message, extract the message content if the user already said it; otherwise leave message empty so Nova can record it.",
         "For staff_alert, use priority urgent for emergency, fall, pain, breathing, or immediate danger.",
-        "JSON shape: {\"action\":\"...\",\"confidence\":0.0,\"destination\":\"\",\"residentId\":\"\",\"residentName\":\"\",\"message\":\"\",\"priority\":\"normal|urgent\",\"reply\":\"\"}"
+        "JSON shape: {\"action\":\"...\",\"confidence\":0.0,\"destination\":\"\",\"residentId\":\"\",\"residentName\":\"\",\"message\":\"\",\"priority\":\"normal|urgent\",\"reply\":\"\",\"patientAccess\":false}"
       ].join(" ")
     },
     {
@@ -714,6 +726,7 @@ select.field{cursor:pointer}
 <div class="card">
 <div class="ch">Add Planned Visit</div>
 <label class="fl">Visitor Name *</label><input class="field" id="pvVisitorName" placeholder="e.g. John Smith">
+<label class="fl">Visitor ID Number *</label><input class="field" id="pvVisitorId" placeholder="ID shown at reception">
 <label class="fl">Resident to Visit</label>
 <select class="field" id="pvResidentSelect"><option value="">Select resident</option></select>
 <label class="fl">Scheduled Date (optional)</label><input class="field" id="pvDate" type="date">
@@ -1032,7 +1045,8 @@ function loadVisits(){
     var pv=out.plannedVisits||[];
     if(!pv.length){el.innerHTML='<div class="esbox">No planned visits yet. Add one using the form.</div>';}
     else{el.innerHTML=pv.map(function(v){
-      var title=String(v.visitorName||"")+" -> "+String(v.residentName||"No resident")+(v.room?" ("+String(v.room)+")":"")+(v.scheduledDate?" - "+String(v.scheduledDate):"");
+      var idTag=v.visitorIdLast4?(" ID ****"+String(v.visitorIdLast4)):" ID missing";
+      var title=String(v.visitorName||"")+idTag+" -> "+String(v.residentName||"No resident")+(v.room?" ("+String(v.room)+")":"")+(v.scheduledDate?" - "+String(v.scheduledDate):"");
       return rRow("blue",title,v.notes||"","<button class='btn s d' onclick='deletePlannedVisit("+jsq(v.id)+")'>Remove</button>");
     }).join("");}
     var vl=out.visitLog||[];
@@ -1043,14 +1057,17 @@ function loadVisits(){
 function addPlannedVisit(){
   var vn=document.getElementById("pvVisitorName");var vv=vn&&vn.value.trim();
   if(!vv)return notice("Visitor name is required.",false);
+  var vid=document.getElementById("pvVisitorId");var vidv=vid&&vid.value.trim();
+  if(!vidv)return notice("Visitor ID number is required.",false);
   var rs=document.getElementById("pvResidentSelect");var rid=rs&&rs.value;
   var ro=rs&&rs.options&&rs.selectedIndex>=0&&rs.options[rs.selectedIndex];
   var rname=(ro&&ro.text)?ro.text.split(" — ")[0]:"";
   var rroom=(ro&&ro.dataset)?ro.dataset.room||"":"";
+  var rmap=(ro&&ro.dataset)?ro.dataset.map||rroom:"";
   var dt=document.getElementById("pvDate");var nt=document.getElementById("pvNotes");
-  post("/api/planned-visits",{visitorName:vv,residentId:rid||"",residentName:rname,room:rroom,scheduledDate:(dt&&dt.value)||"",notes:(nt&&nt.value)||""}).then(function(out){
+  post("/api/planned-visits",{visitorName:vv,visitorIdNumber:vidv,residentId:rid||"",residentName:rname,room:rroom,mapPoint:rmap,scheduledDate:(dt&&dt.value)||"",notes:(nt&&nt.value)||""}).then(function(out){
     notice(out.ok?"Planned visit added":"Error: "+(out.error||"Could not save"),out.ok);
-    if(out.ok){if(vn)vn.value="";if(dt)dt.value="";if(nt)nt.value="";if(rs)rs.selectedIndex=0;loadVisits();}
+    if(out.ok){if(vn)vn.value="";if(vid)vid.value="";if(dt)dt.value="";if(nt)nt.value="";if(rs)rs.selectedIndex=0;loadVisits();}
   });
 }
 function deletePlannedVisit(id){
@@ -1270,7 +1287,7 @@ function renderAll(s){
   if(crs)crs.innerHTML=res.length?res.map(function(r){return'<option value="'+esc(r.id)+'">'+esc(r.name)+" — Room "+esc(r.room)+"</option>";}).join(""):"<option value='' disabled>No residents yet — add in Residents section</option>";
   if(crs&&crsV){crs.value=crsV;}
   var cri=gi("cmdResInfo");if(cri){var crId=crs&&crs.value;var cr=byId(crId);var lci2=cr&&checkIns[cr.id];cri.textContent=cr?("Room "+cr.room+(cr.careLevel?" · "+cr.careLevel:"")+(lci2?" · Last seen "+timeAgo(lci2):" · No check-in on record")):(res.length?"Select a resident above.":"");}
-  var pvrs=gi("pvResidentSelect");if(pvrs)pvrs.innerHTML='<option value="">Select resident</option>'+(res.length?res.map(function(r){return'<option value="'+esc(r.id)+'" data-room="'+esc(r.room||"")+'">'+esc(r.name)+(r.room?" — "+esc(r.room):"")+"</option>";}).join(""):"");
+  var pvrs=gi("pvResidentSelect");if(pvrs)pvrs.innerHTML='<option value="">Select resident</option>'+(res.length?res.map(function(r){return'<option value="'+esc(r.id)+'" data-room="'+esc(r.room||"")+'" data-map="'+esc(r.mapPoint||r.room||"")+'">'+esc(r.name)+(r.room?" — "+esc(r.room):"")+"</option>";}).join(""):"");
   var cps=gi("cmdPointSelect");var cpsV=cps&&cps.value;
   if(cps)cps.innerHTML=pts.length?pts.map(function(p){return'<option value="'+esc(p.name)+'">'+esc(p.name)+"</option>";}).join(""):"<option value='' disabled>Waiting for Nova to connect...</option>";
   if(cps&&cpsV){cps.value=cpsV;}
@@ -1424,7 +1441,40 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true });
     }
     if (url.pathname === "/robot/planned-visits" && req.method === "GET") {
-      return sendJson(res, 200, { ok: true, plannedVisits: facility.plannedVisits });
+      return sendJson(res, 200, { ok: true, plannedVisits: facility.plannedVisits.map(v => ({
+        id: v.id, visitorName: v.visitorName, visitorIdLast4: v.visitorIdLast4 || "",
+        residentId: v.residentId, residentName: v.residentName, room: v.room,
+        scheduledDate: v.scheduledDate, notes: v.notes, createdAt: v.createdAt
+      })) });
+    }
+    if (url.pathname === "/robot/verify-visit" && req.method === "POST") {
+      const body = await readJson(req);
+      if (rejectBadJson(body, res)) return;
+      const visitorName = cleanText(body.visitorName).toLowerCase();
+      const visitorHash = visitorIdHash(body.visitorIdNumber);
+      const residentId = cleanText(body.residentId);
+      const residentName = cleanText(body.residentName).toLowerCase();
+      const today = new Date().toISOString().slice(0, 10);
+      const match = facility.plannedVisits.find(v => {
+        const nameOk = cleanText(v.visitorName).toLowerCase() === visitorName;
+        const idOk = v.visitorIdHash && v.visitorIdHash === visitorHash;
+        const residentOk = (residentId && v.residentId === residentId) ||
+          (residentName && cleanText(v.residentName).toLowerCase() === residentName);
+        const dateOk = !v.scheduledDate || v.scheduledDate === today;
+        return nameOk && idOk && residentOk && dateOk;
+      });
+      if (!match) {
+        facility.visitLog.unshift({ id: crypto.randomUUID(), visitorName: cleanText(body.visitorName).slice(0, 120), residentName: cleanText(body.residentName).slice(0, 120), room: "", plannedVisitId: "", isPlanned: false, denied: true, loggedAt: Date.now() });
+        if (facility.visitLog.length > 200) facility.visitLog.pop();
+        persistData();
+        log("visit_denied", { visitorName: cleanText(body.visitorName), residentName: cleanText(body.residentName) });
+        return sendJson(res, 200, { ok: false, message: "I could not verify that planned visit. Please check with reception." });
+      }
+      facility.visitLog.unshift({ id: crypto.randomUUID(), visitorName: match.visitorName, residentName: match.residentName, room: match.room, plannedVisitId: match.id, isPlanned: true, loggedAt: Date.now() });
+      if (facility.visitLog.length > 200) facility.visitLog.pop();
+      persistData();
+      log("visit_verified", { visitorName: match.visitorName, residentName: match.residentName });
+      return sendJson(res, 200, { ok: true, residentName: match.residentName, mapPoint: match.mapPoint || match.room, message: "Visit verified." });
     }
     if (url.pathname === "/robot/visit-log" && req.method === "POST") {
       const body = await readJson(req);
@@ -1569,7 +1619,12 @@ const server = http.createServer(async (req, res) => {
     log("command", command); return sendJson(res, 200, { ok: true, command });
   }
   if (url.pathname === "/api/planned-visits" && req.method === "GET") {
-    return sendJson(res, 200, { ok: true, plannedVisits: facility.plannedVisits, visitLog: facility.visitLog.slice(0, 50) });
+    return sendJson(res, 200, { ok: true, plannedVisits: facility.plannedVisits.map(v => ({
+      id: v.id, visitorName: v.visitorName, visitorIdLast4: v.visitorIdLast4 || "",
+      residentId: v.residentId, residentName: v.residentName, room: v.room,
+      mapPoint: v.mapPoint || v.room || "", scheduledDate: v.scheduledDate,
+      notes: v.notes, createdAt: v.createdAt
+    })), visitLog: facility.visitLog.slice(0, 50) });
   }
   if (url.pathname === "/api/planned-visits" && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
@@ -1577,7 +1632,21 @@ const server = http.createServer(async (req, res) => {
     if (rejectBadJson(body, res)) return;
     const visitorName = String(body.visitorName || "").trim();
     if (!visitorName) return sendJson(res, 400, { ok: false, error: "visitorName is required" });
-    const entry = { id: crypto.randomUUID(), visitorName: visitorName.slice(0, 120), residentId: String(body.residentId || ""), residentName: String(body.residentName || "").slice(0, 120), room: String(body.room || "").slice(0, 80), scheduledDate: String(body.scheduledDate || ""), notes: String(body.notes || "").slice(0, 500), createdAt: Date.now() };
+    const visitorId = String(body.visitorIdNumber || "").trim();
+    if (!visitorId) return sendJson(res, 400, { ok: false, error: "visitorIdNumber is required" });
+    const entry = {
+      id: crypto.randomUUID(),
+      visitorName: visitorName.slice(0, 120),
+      visitorIdHash: visitorIdHash(visitorId),
+      visitorIdLast4: visitorIdLast4(visitorId),
+      residentId: String(body.residentId || ""),
+      residentName: String(body.residentName || "").slice(0, 120),
+      room: String(body.room || "").slice(0, 80),
+      mapPoint: String(body.mapPoint || body.room || "").slice(0, 120),
+      scheduledDate: String(body.scheduledDate || ""),
+      notes: String(body.notes || "").slice(0, 500),
+      createdAt: Date.now()
+    };
     facility.plannedVisits.push(entry);
     persistData();
     log("planned_visit_added", { visitorName, residentName: entry.residentName });
