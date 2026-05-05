@@ -14,7 +14,7 @@ let robot = {
   online: false, lastSeen: 0, status: {}, detection: {}, people: [], points: [],
   care: { residents: [], reminders: [], alerts: [], logs: [] }, cameraJpegBase64: "",
 };
-const facility = { residents: [], reminders: [], alerts: [], logs: [], roundOrder: [], checkIns: {}, robotAddPin: "", plannedVisits: [], visitLog: [] };
+const facility = { residents: [], reminders: [], alerts: [], dismissedAlertIds: [], logs: [], roundOrder: [], checkIns: {}, robotAddPin: "", plannedVisits: [], visitLog: [] };
 let robotResidentsSynced = false;
 let robotLastSeenAt = 0;
 const scheduledRounds = [];
@@ -59,6 +59,7 @@ function applySnap(saved) {
   if (Array.isArray(saved.residents)) facility.residents = saved.residents;
   if (Array.isArray(saved.reminders)) facility.reminders = saved.reminders;
   if (Array.isArray(saved.alerts)) facility.alerts = saved.alerts;
+  if (Array.isArray(saved.dismissedAlertIds)) facility.dismissedAlertIds = saved.dismissedAlertIds;
   if (Array.isArray(saved.scheduledRounds)) saved.scheduledRounds.forEach(s => scheduledRounds.push(s));
   if (Array.isArray(saved.roundHistory)) saved.roundHistory.forEach(h => roundHistory.push(h));
   if (Array.isArray(saved.roundOrder)) facility.roundOrder = saved.roundOrder;
@@ -91,7 +92,7 @@ let lastSaved = 0;
 function persistData() {
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(async () => {
-    const snap = { residents: facility.residents, reminders: facility.reminders, alerts: facility.alerts, scheduledRounds, roundHistory, roundOrder: facility.roundOrder, checkIns: facility.checkIns, brandLogoDataUrl, robotAddPin: facility.robotAddPin, plannedVisits: facility.plannedVisits, visitLog: facility.visitLog.slice(0, 200) };
+    const snap = { residents: facility.residents, reminders: facility.reminders, alerts: facility.alerts, dismissedAlertIds: facility.dismissedAlertIds.slice(-500), scheduledRounds, roundHistory, roundOrder: facility.roundOrder, checkIns: facility.checkIns, brandLogoDataUrl, robotAddPin: facility.robotAddPin, plannedVisits: facility.plannedVisits, visitLog: facility.visitLog.slice(0, 200) };
     if (mongoDb) {
       try {
         await mongoDb.collection("facility").updateOne({ _id: "state" }, { $set: snap }, { upsert: true });
@@ -222,10 +223,13 @@ function toResident(input) {
 }
 function mergedCare() {
   const rc = robot.care || {};
+  const dismissed = new Set((facility.dismissedAlertIds || []).map(String));
+  const alerts = [...facility.alerts, ...(Array.isArray(rc.alerts) ? rc.alerts : [])]
+    .filter(a => !dismissed.has(String(a && a.id)));
   return {
     residents: facility.residents,
     reminders: [...facility.reminders, ...(Array.isArray(rc.reminders) ? rc.reminders : [])],
-    alerts: [...facility.alerts, ...(Array.isArray(rc.alerts) ? rc.alerts : [])],
+    alerts,
     logs: [...facility.logs, ...(Array.isArray(rc.logs) ? rc.logs : [])],
   };
 }
@@ -1287,7 +1291,9 @@ function renderAll(s){
   if(crs)crs.innerHTML=res.length?res.map(function(r){return'<option value="'+esc(r.id)+'">'+esc(r.name)+" — Room "+esc(r.room)+"</option>";}).join(""):"<option value='' disabled>No residents yet — add in Residents section</option>";
   if(crs&&crsV){crs.value=crsV;}
   var cri=gi("cmdResInfo");if(cri){var crId=crs&&crs.value;var cr=byId(crId);var lci2=cr&&checkIns[cr.id];cri.textContent=cr?("Room "+cr.room+(cr.careLevel?" · "+cr.careLevel:"")+(lci2?" · Last seen "+timeAgo(lci2):" · No check-in on record")):(res.length?"Select a resident above.":"");}
-  var pvrs=gi("pvResidentSelect");if(pvrs)pvrs.innerHTML='<option value="">Select resident</option>'+(res.length?res.map(function(r){return'<option value="'+esc(r.id)+'" data-room="'+esc(r.room||"")+'" data-map="'+esc(r.mapPoint||r.room||"")+'">'+esc(r.name)+(r.room?" — "+esc(r.room):"")+"</option>";}).join(""):"");
+  var pvrs=gi("pvResidentSelect");var pvrsV=pvrs&&pvrs.value;
+  if(pvrs)pvrs.innerHTML='<option value="">Select resident</option>'+(res.length?res.map(function(r){return'<option value="'+esc(r.id)+'" data-room="'+esc(r.room||"")+'" data-map="'+esc(r.mapPoint||r.room||"")+'">'+esc(r.name)+(r.room?" — "+esc(r.room):"")+"</option>";}).join(""):"");
+  if(pvrs&&pvrsV){pvrs.value=pvrsV;}
   var cps=gi("cmdPointSelect");var cpsV=cps&&cps.value;
   if(cps)cps.innerHTML=pts.length?pts.map(function(p){return'<option value="'+esc(p.name)+'">'+esc(p.name)+"</option>";}).join(""):"<option value='' disabled>Waiting for Nova to connect...</option>";
   if(cps&&cpsV){cps.value=cpsV;}
@@ -1603,8 +1609,12 @@ const server = http.createServer(async (req, res) => {
   if (alertDismissMatch && req.method === "POST") {
     if (!requireRole(req, res, "operator")) return;
     const alertId = decodeURIComponent(alertDismissMatch[1]);
-    const idx = facility.alerts.findIndex(a => a.id === alertId);
+    const idx = facility.alerts.findIndex(a => String(a.id) === String(alertId));
     if (idx >= 0) facility.alerts.splice(idx, 1);
+    if (!facility.dismissedAlertIds.map(String).includes(String(alertId))) {
+      facility.dismissedAlertIds.push(String(alertId));
+      if (facility.dismissedAlertIds.length > 500) facility.dismissedAlertIds.splice(0, facility.dismissedAlertIds.length - 500);
+    }
     facility.logs.push({ createdAt: Date.now(), title: "Alert dismissed", detail: alertId });
     persistData(); log("alert_dismissed", { id: alertId }); return sendJson(res, 200, { ok: true });
   }
