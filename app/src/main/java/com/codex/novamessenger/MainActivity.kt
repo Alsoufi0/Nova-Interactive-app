@@ -262,7 +262,7 @@ class MainActivity : Activity() {
         outer.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = rounded(Color.argb(248, 235, 242, 243), 0)
-            setPadding(dp(8), dp(6), dp(8), 0)
+            setPadding(dp(6), dp(4), dp(6), 0)
             addView(header())
             if (safetyStopStatus.contains("Stopped")) addView(emergencyStopBar())
         }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
@@ -274,7 +274,7 @@ class MainActivity : Activity() {
         scrollView = scroll
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(6), dp(8), dp(10))
+            setPadding(dp(8), dp(4), dp(8), dp(8))
             background = rounded(Color.argb(215, 235, 242, 243), 0)
         }
         if (currentTaskProgress > 0 || safetyStopStatus.contains("Stopped")) root.addView(taskProgressStrip())
@@ -1095,16 +1095,16 @@ class MainActivity : Activity() {
         hint = hintText
         setText(value)
         setSingleLine(true)
-        textSize = 17f
+        textSize = 12f
         setTextColor(Text)
         setHintTextColor(Muted)
-        setPadding(dp(12), dp(8), dp(12), dp(8))
+        setPadding(dp(10), dp(6), dp(10), dp(6))
         background = rounded(Color.WHITE, dp(8), Stroke)
     }
 
     internal fun destinationDropdown(): Spinner = Spinner(this).apply {
         background = rounded(Color.WHITE, dp(8), Stroke)
-        minimumHeight = dp(56)
+        minimumHeight = dp(42)
         setPadding(dp(10), 0, dp(10), 0)
         adapter = destinationAdapter()
         val wanted = selectedDestination.lowercase()
@@ -1153,27 +1153,27 @@ class MainActivity : Activity() {
     internal fun card(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         background = rounded(Card, dp(14), Color.rgb(210, 222, 224))
-        setPadding(dp(14), dp(12), dp(14), dp(14))
+        setPadding(dp(10), dp(8), dp(10), dp(10))
         layoutParams = full().apply { bottomMargin = dp(8) }
     }
 
     internal fun compactCard(text: String, onClick: () -> Unit): View = TextView(this).apply {
         this.text = text
-        textSize = 16f
+        textSize = 12f
         setTextColor(Text)
         background = rounded(Card, dp(8), Stroke)
-        setPadding(dp(14), dp(12), dp(14), dp(12))
+        setPadding(dp(10), dp(8), dp(10), dp(8))
         setOnClickListener { onClick() }
         layoutParams = full().apply { bottomMargin = dp(8) }
     }
 
     internal fun emptyState(text: String): TextView = TextView(this).apply {
         this.text = text
-        textSize = 15f
+        textSize = 11f
         setTextColor(Muted)
         gravity = Gravity.CENTER
         background = rounded(Card, dp(8), Stroke)
-        setPadding(dp(18), dp(20), dp(18), dp(20))
+        setPadding(dp(12), dp(12), dp(12), dp(12))
     }
 
     internal fun buttonRow(vararg children: View): LinearLayout = LinearLayout(this).apply {
@@ -1209,8 +1209,8 @@ class MainActivity : Activity() {
 
     internal fun actionButton(text: String, color: Int = Primary, onClick: () -> Unit): Button = Button(this).apply {
         this.text = text
-        textSize = 13f
-        minHeight = dp(48)
+        textSize = 10f
+        minHeight = dp(34)
         minWidth = 0
         maxLines = 2
         includeFontPadding = false
@@ -1218,18 +1218,18 @@ class MainActivity : Activity() {
         typeface = Typeface.DEFAULT_BOLD
         setAllCaps(false)
         background = rounded(color, dp(10))
-        setPadding(dp(12), dp(8), dp(12), dp(8))
+        setPadding(dp(10), dp(7), dp(10), dp(7))
         setOnClickListener { onClick() }
     }
 
     internal fun badge(text: String, color: Int): TextView = TextView(this).apply {
         this.text = text
-        textSize = 10f
+        textSize = 8f
         typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
         setTextColor(Color.WHITE)
         background = rounded(color, dp(99))
-        setPadding(dp(8), dp(6), dp(8), dp(6))
+        setPadding(dp(7), dp(5), dp(7), dp(5))
     }
 
     internal fun rounded(color: Int, radius: Int, stroke: Int? = null): GradientDrawable =

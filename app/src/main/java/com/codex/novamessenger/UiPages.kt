@@ -75,11 +75,11 @@ internal fun MainActivity.compactStatus(title: String, value: String): View {
     val box = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         background = rounded(Card, dp(8), Stroke)
-        setPadding(dp(10), dp(7), dp(10), dp(8))
+        setPadding(dp(8), dp(5), dp(8), dp(6))
     }
     box.addView(TextView(this).apply {
         text = title
-        textSize = 9f
+        textSize = 8f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Muted)
     })
@@ -223,17 +223,17 @@ internal fun MainActivity.homePage(): View {
     // Greeting
     root.addView(LinearLayout(this@homePage).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(4), dp(2), dp(4), dp(10))
+        setPadding(dp(4), dp(1), dp(4), dp(6))
         addView(android.widget.TextView(this@homePage).apply {
             text = "Nova Care Assistant"
-            textSize = 22f
+            textSize = 18f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(PrimaryDark)
         })
         addView(android.widget.TextView(this@homePage).apply {
             text = if (robot.isRobotSdkAvailable) "Connected  ·  ${lastBattery.replace("Battery ", "")}"
                    else "Preview Mode  ·  ${lastMapPoints.size} map points"
-            textSize = 13f
+            textSize = 10f
             setTextColor(Muted)
             setPadding(0, dp(3), 0, 0)
         })
@@ -285,7 +285,7 @@ internal fun MainActivity.homeFeatureCard(title: String, subtitle: String, badge
         orientation = LinearLayout.VERTICAL
         background = rounded(Color.WHITE, dp(16), Color.argb(70, Color.red(color), Color.green(color), Color.blue(color)))
         setPadding(dp(14), dp(16), dp(14), dp(16))
-        minimumHeight = dp(130)
+        minimumHeight = dp(104)
         setOnClickListener { onClick() }
     }
     box.addView(View(this@homeFeatureCard).apply {
@@ -294,7 +294,7 @@ internal fun MainActivity.homeFeatureCard(title: String, subtitle: String, badge
     })
     box.addView(android.widget.TextView(this@homeFeatureCard).apply {
         text = title
-        textSize = 16f
+        textSize = 13f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(PrimaryDark)
     })
@@ -328,7 +328,8 @@ internal fun MainActivity.homeFeatureCard(title: String, subtitle: String, badge
 internal fun MainActivity.messagePage(): View {
     val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     root.addView(pageHero("Visitor Message", "Capture a message, choose the care desk or room, and let Nova deliver it."))
-    root.addView(twoPane(workflowCard(), messageQueuePanel(), 1.05f, 1f))
+    root.addView(workflowCard())
+    root.addView(messageQueuePanel())
     messageDelivery.refreshMessages()
     return root
 }
@@ -372,7 +373,7 @@ internal fun MainActivity.cameraPage(): View {
     })
     panel.addView(cameraPreviewView())
     panel.addView(detectionOverlayCard())
-    root.addView(twoPane(panel, cameraActionsCard(), 1.25f, 0.75f))
+    root.addView(twoPane(panel, cameraActionsCard(), 1.45f, 0.55f))
     return root
 }
 
@@ -408,7 +409,7 @@ internal fun MainActivity.cameraActionsCard(): View {
 
 internal fun MainActivity.cameraPreviewView(): TextureView = TextureView(this).apply {
     layoutParams = full().apply {
-        height = dp(355)
+        height = dp(285)
         bottomMargin = dp(8)
     }
     cameraFeed.bindPreview(this)
@@ -440,11 +441,16 @@ internal fun MainActivity.detectionOverlayCard(): View {
 
 internal fun MainActivity.messageQueuePanel(): View {
     val box = card()
-    box.addView(TextView(this).apply {
-        text = "Message History"
-        textSize = 16f
-        typeface = Typeface.DEFAULT_BOLD
-        setTextColor(Text)
+    box.addView(LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        addView(TextView(this@messageQueuePanel).apply {
+            text = "Message History"
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Text)
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        addView(compactStatus("Pending", repo.pendingCount().toString()), LinearLayout.LayoutParams(dp(115), LinearLayout.LayoutParams.WRAP_CONTENT))
     })
     messageList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     box.addView(messageList, full().apply { topMargin = dp(6) })
@@ -453,24 +459,46 @@ internal fun MainActivity.messageQueuePanel(): View {
 
 internal fun MainActivity.workflowCard(): View {
     val card = card()
+    card.addView(TextView(this).apply {
+        text = "Message Intake"
+        textSize = 13f
+        typeface = Typeface.DEFAULT_BOLD
+        setTextColor(Text)
+    })
+    card.addView(TextView(this).apply {
+        text = "For visitors, family members, delivery staff, and care handoffs."
+        textSize = 9f
+        setTextColor(Muted)
+        setPadding(0, dp(2), 0, dp(6))
+    })
     clientInput = input("Client or host name", clientName)
     pointInput = destinationDropdown()
     messageInput = android.widget.EditText(this).apply {
         hint = "Message for the destination"
         setText(messageDraft)
-        minLines = 3
+        minLines = 2
         gravity = Gravity.TOP
-        textSize = 14f
+        textSize = 11f
         setTextColor(Text)
         setHintTextColor(Muted)
         setBackgroundColor(Color.TRANSPARENT)
-        setPadding(dp(12), dp(10), dp(12), dp(10))
+        setPadding(dp(10), dp(7), dp(10), dp(7))
         background = rounded(Color.WHITE, dp(8), Stroke)
     }
-    card.addView(label("Client"))
-    card.addView(clientInput, full())
-    card.addView(label("Destination"))
-    card.addView(pointInput, full())
+    val intakeRow = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        addView(LinearLayout(this@workflowCard).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(label("From / For"))
+            addView(clientInput, full())
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
+        addView(LinearLayout(this@workflowCard).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(label("Destination"))
+            addView(pointInput, full())
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+    }
+    card.addView(intakeRow)
     card.addView(label("Message"))
     card.addView(messageInput, full())
     card.addView(buttonRow(
@@ -484,7 +512,7 @@ internal fun MainActivity.workflowCard(): View {
     card.addView(actionButton("Deliver to ${destination()}", Accent) {
         messageDelivery.sendCurrentMessageToPoint()
     }.apply {
-        textSize = 14f
+        textSize = 11f
         layoutParams = full().apply { topMargin = dp(10) }
     })
     return card
@@ -595,12 +623,12 @@ internal fun MainActivity.careActionTile(title: String, subtitle: String, color:
         gravity = Gravity.CENTER
         background = rounded(Color.WHITE, dp(12), Color.argb(90, Color.red(color), Color.green(color), Color.blue(color)))
         setPadding(dp(10), dp(16), dp(10), dp(16))
-        minimumHeight = dp(88)
+        minimumHeight = dp(70)
         setOnClickListener { onClick() }
     }
     box.addView(TextView(this).apply {
         text = title
-        textSize = 16f
+        textSize = 12f
         typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
         setTextColor(color)
@@ -664,7 +692,7 @@ internal fun MainActivity.residentRowCard(resident: CareResident): View {
     })
     nameBox.addView(TextView(this).apply {
         text = "${resident.room}  •  ${resident.mapPoint}"
-        textSize = 12f
+        textSize = 8f
         setTextColor(Muted)
         setPadding(0, dp(2), 0, 0)
     })
@@ -897,12 +925,12 @@ internal fun MainActivity.followProfileTile(title: String, subtitle: String, col
         gravity = Gravity.CENTER
         background = rounded(bg, dp(12), border)
         setPadding(dp(10), dp(16), dp(10), dp(16))
-        minimumHeight = dp(88)
+        minimumHeight = dp(70)
         setOnClickListener { onClick() }
     }
     box.addView(TextView(this).apply {
         text = title
-        textSize = 16f
+        textSize = 12f
         typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
         setTextColor(if (active) color else Text)
@@ -959,8 +987,9 @@ internal fun MainActivity.settingsPanel(): View {
     val afterMissionDisplay = afterMissionLabels.getOrElse(
         afterMissionKeys.indexOf(vm.afterMissionBehavior).coerceAtLeast(0)) { "Return to Home Base" }
     missionBox.addView(buttonRow(
-        compactStatus("Home Base", vm.homeBase),
-        compactStatus("After Mission", afterMissionDisplay)
+        compactStatus("Base", vm.homeBase),
+        compactStatus("After Visit", afterMissionDisplay),
+        compactStatus("Wait", "${vm.roundWaitSeconds}s")
     ))
 
     val homeBaseSpinner = Spinner(this).apply {
@@ -1087,13 +1116,13 @@ internal fun MainActivity.pageHero(title: String, subtitle: String): View =
         layoutParams = full()
         addView(android.widget.TextView(this@pageHero).apply {
             text = title
-            textSize = 22f
+            textSize = 16f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(PrimaryDark)
         })
         addView(android.widget.TextView(this@pageHero).apply {
             text = subtitle
-            textSize = 13f
+            textSize = 10f
             setTextColor(Muted)
             setPadding(0, dp(3), 0, 0)
         })
@@ -1114,9 +1143,9 @@ internal fun MainActivity.circleIcon(text: String, color: Int, size: Int): View 
 internal fun MainActivity.header(): View {
     val box = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        background = rounded(Color.WHITE, dp(12), Color.rgb(225, 232, 236))
-        setPadding(dp(10), dp(8), dp(10), dp(8))
-        layoutParams = full().apply { bottomMargin = dp(6) }
+        background = rounded(Color.WHITE, dp(10), Color.rgb(225, 232, 236))
+        setPadding(dp(8), dp(5), dp(8), dp(5))
+        layoutParams = full().apply { bottomMargin = dp(4) }
     }
     val top = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
@@ -1129,13 +1158,13 @@ internal fun MainActivity.header(): View {
     }
     titleBox.addView(TextView(this).apply {
         text = "Nova Care Assistant"
-        textSize = 15f
+        textSize = 10f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Color.rgb(12, 24, 56))
     })
     titleBox.addView(TextView(this).apply {
         text = "Healthcare - Elder Care"
-        textSize = 9f
+        textSize = 8f
         setTextColor(Color.rgb(57, 70, 104))
     })
     top.addView(titleBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
@@ -1149,12 +1178,12 @@ internal fun MainActivity.header(): View {
     ).also { it.marginStart = dp(4) })
     top.addView(TextView(this).apply {
         text = "STOP"
-        textSize = 12f
+        textSize = 11f
         typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
         setTextColor(Color.WHITE)
-        background = rounded(Danger, dp(10), 0)
-        setPadding(dp(18), dp(9), dp(18), dp(9))
+        background = rounded(Danger, dp(8), 0)
+        setPadding(dp(14), dp(7), dp(14), dp(7))
         isClickable = true
         isFocusable = true
         setOnClickListener { stopAll(); setContentView(buildUi()) }
@@ -1164,10 +1193,10 @@ internal fun MainActivity.header(): View {
     box.addView(top)
     statusView = TextView(this).apply {
         text = "Unit 01  |  ${if (robot.isRobotSdkAvailable) "Online" else "Preview"}  |  ${lastBattery.replace("Battery ", "")}  |  ${SimpleDateFormat("MMM d, h:mm a", Locale.US).format(Date())}"
-        textSize = 10f
+        textSize = 8f
         gravity = Gravity.START
         setTextColor(Color.rgb(57, 70, 104))
-        setPadding(0, dp(4), 0, 0)
+        setPadding(0, dp(2), 0, 0)
     }
     box.addView(statusView, full())
     return box
@@ -1175,10 +1204,10 @@ internal fun MainActivity.header(): View {
 
 internal fun MainActivity.zoxLogoMark(): View = TextView(this).apply {
     text = "ZOX"
-    textSize = 11f
+    textSize = 9f
     typeface = Typeface.DEFAULT_BOLD
     gravity = Gravity.CENTER
     setTextColor(Color.rgb(18, 211, 234))
     background = rounded(Color.rgb(4, 20, 45), dp(16), Color.rgb(18, 198, 231))
-    layoutParams = LinearLayout.LayoutParams(dp(36), dp(36))
+    layoutParams = LinearLayout.LayoutParams(dp(26), dp(26))
 }
