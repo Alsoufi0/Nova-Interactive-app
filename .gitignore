@@ -1,4 +1,6 @@
 cloud-relay/.data/
+cloud-relay/node_modules/
+cloud-relay/nova_data.json
 .gradle/
 .idea/
 .kotlin/

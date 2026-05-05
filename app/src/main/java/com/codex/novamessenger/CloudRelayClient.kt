@@ -23,7 +23,7 @@ class CloudRelayClient(
     private var consecutiveFailures = 0
     private var nextRetryAfter = 0L
 
-    private val pendingResults = ConcurrentLinkedQueue<Pair<String, String>>()
+    private val pendingResults = ConcurrentLinkedQueue<PendingCommandResult>()
 
     private val tick = object : Runnable {
         override fun run() {
@@ -61,16 +61,18 @@ class CloudRelayClient(
             val commands = response.optJSONArray("commands") ?: JSONArray()
             for (i in 0 until commands.length()) {
                 val item = commands.optJSONObject(i) ?: continue
+                val paramsJson = item.optJSONObject("params") ?: JSONObject()
                 val command = CloudCommand(
                     id = item.optString("id"),
                     action = item.optString("action"),
-                    params = jsonToMap(item.optJSONObject("params") ?: JSONObject())
+                    params = jsonToMap(paramsJson),
+                    rawParams = paramsJson
                 )
                 val result = commandHandler(command)
                 runCatching {
-                    postJson("$base/robot/result", JSONObject().put("id", command.id).put("result", result), token)
+                    postJson("$base/robot/result", commandResultJson(command, result), token)
                 }.onFailure {
-                    pendingResults.offer(command.id to result)
+                    pendingResults.offer(PendingCommandResult(command, result))
                     Log.w(TAG, "Result for command ${command.id} queued for retry: ${it.message}")
                 }
             }
@@ -86,14 +88,23 @@ class CloudRelayClient(
     private fun flushPendingResults(base: String, token: String) {
         val iterator = pendingResults.iterator()
         while (iterator.hasNext()) {
-            val (id, result) = iterator.next()
+            val pending = iterator.next()
             val sent = runCatching {
-                postJson("$base/robot/result", JSONObject().put("id", id).put("result", result), token)
+                postJson("$base/robot/result", commandResultJson(pending.command, pending.result), token)
                 iterator.remove()
             }.isSuccess
             if (!sent) break
         }
     }
+
+    private fun commandResultJson(command: CloudCommand, result: String): JSONObject =
+        JSONObject()
+            .put("id", command.id)
+            .put("action", command.action)
+            .put("params", command.rawParams)
+            .put("result", result)
+            .put("ok", !result.contains("failed", ignoreCase = true) && !result.contains("unknown", ignoreCase = true))
+            .put("completedAt", System.currentTimeMillis())
 
     private fun getJson(url: String, token: String): JSONObject {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -168,7 +179,13 @@ class CloudRelayClient(
     data class CloudCommand(
         val id: String,
         val action: String,
-        val params: Map<String, String>
+        val params: Map<String, String>,
+        val rawParams: JSONObject = JSONObject(params)
+    )
+
+    private data class PendingCommandResult(
+        val command: CloudCommand,
+        val result: String
     )
 
     companion object {
