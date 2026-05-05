@@ -1085,26 +1085,26 @@ class MainActivity : Activity() {
 
     internal fun label(text: String): TextView = TextView(this).apply {
         this.text = text
-        textSize = 13f
+        textSize = 9f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Muted)
-        setPadding(0, dp(10), 0, dp(6))
+        setPadding(0, dp(5), 0, dp(3))
     }
 
     internal fun input(hintText: String, value: String): EditText = EditText(this).apply {
         hint = hintText
         setText(value)
         setSingleLine(true)
-        textSize = 12f
+        textSize = 10f
         setTextColor(Text)
         setHintTextColor(Muted)
-        setPadding(dp(10), dp(6), dp(10), dp(6))
+        setPadding(dp(8), dp(4), dp(8), dp(4))
         background = rounded(Color.WHITE, dp(8), Stroke)
     }
 
     internal fun destinationDropdown(): Spinner = Spinner(this).apply {
         background = rounded(Color.WHITE, dp(8), Stroke)
-        minimumHeight = dp(42)
+        minimumHeight = dp(34)
         setPadding(dp(10), 0, dp(10), 0)
         adapter = destinationAdapter()
         val wanted = selectedDestination.lowercase()
@@ -1210,7 +1210,7 @@ class MainActivity : Activity() {
     internal fun actionButton(text: String, color: Int = Primary, onClick: () -> Unit): Button = Button(this).apply {
         this.text = text
         textSize = 10f
-        minHeight = dp(34)
+        minHeight = dp(28)
         minWidth = 0
         maxLines = 2
         includeFontPadding = false
@@ -1218,7 +1218,7 @@ class MainActivity : Activity() {
         typeface = Typeface.DEFAULT_BOLD
         setAllCaps(false)
         background = rounded(color, dp(10))
-        setPadding(dp(10), dp(7), dp(10), dp(7))
+        setPadding(dp(8), dp(5), dp(8), dp(5))
         setOnClickListener { onClick() }
     }
 

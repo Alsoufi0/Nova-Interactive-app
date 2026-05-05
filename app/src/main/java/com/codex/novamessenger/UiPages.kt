@@ -75,7 +75,7 @@ internal fun MainActivity.compactStatus(title: String, value: String): View {
     val box = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         background = rounded(Card, dp(8), Stroke)
-        setPadding(dp(8), dp(5), dp(8), dp(6))
+        setPadding(dp(7), dp(4), dp(7), dp(5))
     }
     box.addView(TextView(this).apply {
         text = title
@@ -109,14 +109,14 @@ internal fun MainActivity.taskProgressStrip(): View {
     val box = LinearLayout(this@taskProgressStrip).apply {
         orientation = LinearLayout.VERTICAL
         background = rounded(bg, dp(10), border)
-        setPadding(dp(12), dp(9), dp(12), dp(9))
+        setPadding(dp(10), dp(6), dp(10), dp(6))
         layoutParams = full().apply { bottomMargin = dp(3) }
     }
 
     if (stopped) {
         box.addView(TextView(this@taskProgressStrip).apply {
             text = "Stopped (Safety) — All movement halted"
-            textSize = 14f
+            textSize = 10f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             setTextColor(Danger)
@@ -147,7 +147,7 @@ internal fun MainActivity.taskProgressStrip(): View {
     if (hasTask && currentTaskStage.isNotBlank()) {
         box.addView(TextView(this@taskProgressStrip).apply {
             text = currentTaskStage
-            textSize = 11f
+            textSize = 8f
             setTextColor(Muted)
             setPadding(0, dp(2), 0, dp(4))
         })
@@ -176,19 +176,18 @@ internal fun MainActivity.emergencyStopBar(): View {
         LinearLayout(this@emergencyStopBar).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            background = rounded(Danger, dp(10), 0)
-            minimumHeight = dp(52)
-            setPadding(dp(16), dp(10), dp(16), dp(10))
+            background = rounded(Color.rgb(255, 246, 246), dp(8), Danger)
+            minimumHeight = dp(34)
+            setPadding(dp(12), dp(6), dp(12), dp(6))
             layoutParams = full().apply { topMargin = dp(4); bottomMargin = dp(4) }
             isClickable = true; isFocusable = true
             setOnClickListener { resumeOperations(); setContentView(buildUi()) }
             addView(android.widget.TextView(this@emergencyStopBar).apply {
                 text = "STOPPED  —  Tap to Resume Operations"
-                textSize = 16f
+                textSize = 10f
                 typeface = Typeface.DEFAULT_BOLD
                 gravity = Gravity.CENTER
-                setTextColor(Color.WHITE)
-                letterSpacing = 0.04f
+                setTextColor(Danger)
                 layoutParams = full()
             })
         }
@@ -220,107 +219,104 @@ internal fun MainActivity.emergencyStopBar(): View {
 internal fun MainActivity.homePage(): View {
     val root = LinearLayout(this@homePage).apply { orientation = LinearLayout.VERTICAL }
 
-    // Greeting
     root.addView(LinearLayout(this@homePage).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(4), dp(1), dp(4), dp(6))
+        setPadding(dp(4), dp(1), dp(4), dp(5))
         addView(android.widget.TextView(this@homePage).apply {
-            text = "Nova Care Assistant"
-            textSize = 18f
+            text = "Today"
+            textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(PrimaryDark)
         })
         addView(android.widget.TextView(this@homePage).apply {
-            text = if (robot.isRobotSdkAvailable) "Connected  ·  ${lastBattery.replace("Battery ", "")}"
-                   else "Preview Mode  ·  ${lastMapPoints.size} map points"
-            textSize = 10f
+            text = "Choose a care workflow or let visitors speak naturally to Nova."
+            textSize = 7f
             setTextColor(Muted)
-            setPadding(0, dp(3), 0, 0)
+            setPadding(0, dp(2), 0, 0)
         })
     })
 
-    // Primary feature cards
+    root.addView(buttonRow(
+        compactStatus("Residents", careRepo.residents().size.toString()),
+        compactStatus("Due", careRepo.reminders().count { it.doneAt == null }.toString()),
+        compactStatus("Alerts", careRepo.alerts().size.toString())
+    ))
+
     root.addView(twoPane(
-        homeFeatureCard("Message Delivery", "Record, save & deliver\nvisitor messages",
-            repo.pendingCount().let { if (it > 0) "$it in queue" else null }, Accent) {
+        homeFeatureCard("Visitor Message", "Capture and deliver a message",
+            repo.pendingCount().let { if (it > 0) "$it pending" else null }, Accent) {
             currentPage = "message"; setContentView(buildUi())
         },
-        homeFeatureCard("Care Rounds", "Resident check-ins,\nmedication & reminders",
-            careRepo.reminders().count { it.doneAt == null }.let { if (it > 0) "$it pending today" else null }, CareBlue) {
+        homeFeatureCard("Care Rounds", "Check-ins and reminders",
+            careRepo.reminders().count { it.doneAt == null }.let { if (it > 0) "$it due" else null }, CareBlue) {
             currentPage = "care"; setContentView(buildUi())
         }
     ))
 
-    // Guide row
+    root.addView(twoPane(
+        homeFeatureCard("Resident Check-In", "Visit one resident room", null, Good) {
+            currentPage = "care"; setContentView(buildUi())
+        },
+        homeFeatureCard("Staff Alert", "Notify care staff now", careRepo.alerts().size.takeIf { it > 0 }?.let { "$it open" }, Danger) {
+            careWorkflow.createStaffAlert("urgent", destination(), "Assistance requested from Nova.")
+        }
+    ))
+
     root.addView(card().also { c ->
-        c.addView(android.widget.TextView(this@homePage).apply {
-            text = "Guide a Visitor"
-            textSize = 15f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Text)
-        })
-        c.addView(android.widget.TextView(this@homePage).apply {
-            text = "Navigate Nova to any saved destination point"
-            textSize = 12f
-            setTextColor(Muted)
-            setPadding(0, dp(2), 0, dp(10))
-        })
         c.addView(buttonRow(
             destinationDropdown().also { pointInput = it },
-            actionButton("Go  →", Primary) { saveSettings(); goToDestination() }
+            actionButton("Guide Visitor", Primary) { saveSettings(); goToDestination() },
+            actionButton("Safety View", PrimaryDark) { currentPage = "camera"; setContentView(buildUi()) }
         ))
     })
 
-    // Secondary quick actions
     root.addView(buttonRow(
-        actionButton("Follow", Good) { startFollowMode(); currentPage = "robot"; setContentView(buildUi()) },
-        actionButton("Camera", PrimaryDark) { currentPage = "camera"; setContentView(buildUi()) },
-        actionButton("Alert Staff", Danger) { careWorkflow.createStaffAlert("urgent", destination(), "Assistance requested from Nova.") }
+        actionButton("Follow Assist", Neutral) { startFollowMode(); currentPage = "robot"; setContentView(buildUi()) },
+        actionButton("Settings", Neutral) { currentPage = "robot"; setContentView(buildUi()) }
     ))
     return root
 }
-
 internal fun MainActivity.homeFeatureCard(title: String, subtitle: String, badge: String?, color: Int, onClick: () -> Unit): View {
     val box = LinearLayout(this@homeFeatureCard).apply {
         orientation = LinearLayout.VERTICAL
-        background = rounded(Color.WHITE, dp(16), Color.argb(70, Color.red(color), Color.green(color), Color.blue(color)))
-        setPadding(dp(14), dp(16), dp(14), dp(16))
-        minimumHeight = dp(104)
+        background = rounded(Color.WHITE, dp(10), Color.argb(60, Color.red(color), Color.green(color), Color.blue(color)))
+        setPadding(dp(8), dp(7), dp(8), dp(7))
+        minimumHeight = dp(48)
         setOnClickListener { onClick() }
     }
     box.addView(View(this@homeFeatureCard).apply {
         background = rounded(color, dp(6))
-        layoutParams = LinearLayout.LayoutParams(dp(32), dp(5)).also { it.bottomMargin = dp(10) }
+        layoutParams = LinearLayout.LayoutParams(dp(20), dp(3)).also { it.bottomMargin = dp(5) }
     })
     box.addView(android.widget.TextView(this@homeFeatureCard).apply {
         text = title
-        textSize = 13f
+        textSize = 9f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(PrimaryDark)
     })
     box.addView(android.widget.TextView(this@homeFeatureCard).apply {
         text = subtitle
-        textSize = 12f
+        textSize = 7f
         setTextColor(Muted)
         setPadding(0, dp(4), 0, 0)
     })
     if (badge != null) {
         box.addView(android.widget.TextView(this@homeFeatureCard).apply {
             text = badge
-            textSize = 11f
+            textSize = 8f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(color)
             background = rounded(Color.argb(22, Color.red(color), Color.green(color), Color.blue(color)), dp(6), color)
-            setPadding(dp(8), dp(4), dp(8), dp(4))
-            layoutParams = full().apply { topMargin = dp(10) }
+            setPadding(dp(6), dp(3), dp(6), dp(3))
+            layoutParams = full().apply { topMargin = dp(6) }
         })
     }
     box.addView(android.widget.TextView(this@homeFeatureCard).apply {
-        text = "Open  →"
-        textSize = 11f
+        text = "Open"
+        textSize = 8f
         setTextColor(Color.argb(130, Color.red(color), Color.green(color), Color.blue(color)))
         gravity = android.view.Gravity.END
-        layoutParams = full().apply { topMargin = dp(8) }
+        layoutParams = full().apply { topMargin = dp(4) }
     })
     return box
 }
@@ -346,7 +342,7 @@ internal fun MainActivity.carePage(): View {
 
 internal fun MainActivity.destinationsPage(): View {
     val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    root.addView(pageHero("Map Destinations", "Pick a named point. Nova uses RobotAPI navigation to guide or deliver."))
+    root.addView(pageHero("Facility Map", "Saved rooms, care desks, and visitor destinations."))
     root.addView(twoPane(facilityMapCard(), pointsPanel(), 1.35f, 0.65f))
     renderPoints(lastMapPoints, updateStatus = false)
     return root
@@ -354,7 +350,7 @@ internal fun MainActivity.destinationsPage(): View {
 
 internal fun MainActivity.robotPage(): View {
     val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    root.addView(pageHero("Care Operations", "Follow assistance, task timing, home base, and cloud connection."))
+    root.addView(pageHero("Operations Settings", "Care timing, base location, follow assistance, and cloud connection."))
     root.addView(followProfilePanel())
     root.addView(followActionsCard())
     root.addView(settingsPanel())
@@ -366,8 +362,8 @@ internal fun MainActivity.cameraPage(): View {
     root.addView(pageHero("Safety View", "Live camera, person detection, and after-hours monitoring."))
     val panel = card()
     panel.addView(TextView(this).apply {
-        text = "Live Camera"
-        textSize = 18f
+        text = "Observation"
+        textSize = 10f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Text)
     })
@@ -382,8 +378,8 @@ internal fun MainActivity.cameraPage(): View {
 internal fun MainActivity.cameraActionsCard(): View {
     val panel = card()
     panel.addView(TextView(this).apply {
-        text = "Safety Controls"
-        textSize = 16f
+        text = "Detection Mode"
+        textSize = 12f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Text)
     })
@@ -461,28 +457,28 @@ internal fun MainActivity.workflowCard(): View {
     val card = card()
     card.addView(TextView(this).apply {
         text = "Message Intake"
-        textSize = 13f
+        textSize = 11f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Text)
     })
     card.addView(TextView(this).apply {
         text = "For visitors, family members, delivery staff, and care handoffs."
-        textSize = 9f
+        textSize = 7f
         setTextColor(Muted)
-        setPadding(0, dp(2), 0, dp(6))
+        setPadding(0, dp(1), 0, dp(3))
     })
     clientInput = input("Client or host name", clientName)
     pointInput = destinationDropdown()
     messageInput = android.widget.EditText(this).apply {
         hint = "Message for the destination"
         setText(messageDraft)
-        minLines = 2
+        minLines = 1
         gravity = Gravity.TOP
-        textSize = 11f
+        textSize = 9f
         setTextColor(Text)
         setHintTextColor(Muted)
         setBackgroundColor(Color.TRANSPARENT)
-        setPadding(dp(10), dp(7), dp(10), dp(7))
+        setPadding(dp(8), dp(4), dp(8), dp(4))
         background = rounded(Color.WHITE, dp(8), Stroke)
     }
     val intakeRow = LinearLayout(this).apply {
@@ -512,8 +508,8 @@ internal fun MainActivity.workflowCard(): View {
     card.addView(actionButton("Deliver to ${destination()}", Accent) {
         messageDelivery.sendCurrentMessageToPoint()
     }.apply {
-        textSize = 11f
-        layoutParams = full().apply { topMargin = dp(10) }
+        textSize = 9f
+        layoutParams = full().apply { topMargin = dp(5) }
     })
     return card
 }
@@ -523,8 +519,8 @@ internal fun MainActivity.workflowCard(): View {
 internal fun MainActivity.facilityMapCard(): View {
     val box = card()
     box.addView(TextView(this).apply {
-        text = "Live Facility Map"
-        textSize = 18f
+        text = "Facility View"
+        textSize = 13f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Text)
     })
@@ -562,7 +558,7 @@ internal fun MainActivity.movementVisualPanel(): TextView {
     }
     return TextView(this).apply {
         this.text = text
-        textSize = 14f
+        textSize = 10f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(if (moving) Primary else Text)
         background = rounded(Color.rgb(246, 250, 250), dp(8), Stroke)
@@ -573,8 +569,8 @@ internal fun MainActivity.movementVisualPanel(): TextView {
 internal fun MainActivity.pointsPanel(): View {
     val box = card()
     box.addView(TextView(this).apply {
-        text = "Destinations"
-        textSize = 16f
+        text = "Rooms & Care Points"
+        textSize = 13f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Text)
     })
@@ -628,7 +624,7 @@ internal fun MainActivity.careActionTile(title: String, subtitle: String, color:
     }
     box.addView(TextView(this).apply {
         text = title
-        textSize = 12f
+        textSize = 8f
         typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
         setTextColor(color)
@@ -652,7 +648,7 @@ internal fun MainActivity.careResidentsPanel(): View {
     }
     header.addView(TextView(this).apply {
         text = "Residents"
-        textSize = 16f
+        textSize = 13f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Text)
         layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -686,7 +682,7 @@ internal fun MainActivity.residentRowCard(resident: CareResident): View {
     val nameBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     nameBox.addView(TextView(this).apply {
         text = resident.name
-        textSize = 15f
+        textSize = 13f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Text)
     })
@@ -875,8 +871,8 @@ internal fun MainActivity.careToolsCard(): View {
 internal fun MainActivity.followProfilePanel(): View {
     val box = card()
     box.addView(TextView(this).apply {
-        text = "Follow Profile"
-        textSize = 15f
+        text = "Follow Assist"
+        textSize = 13f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Text)
     })
@@ -907,7 +903,7 @@ internal fun MainActivity.followProfilePanel(): View {
     val statusBg = if (follow.isRunning()) Color.rgb(232, 248, 235) else Color.rgb(245, 248, 250)
     box.addView(TextView(this).apply {
         text = statusText
-        textSize = 14f
+        textSize = 11f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(statusColor)
         background = rounded(statusBg, dp(8), Stroke)
@@ -1030,7 +1026,7 @@ internal fun MainActivity.settingsPanel(): View {
     // ── Timing ────────────────────────────────────────────────────────────────
     box.addView(TextView(this).apply {
         text = "Care Timing"
-        textSize = 15f
+        textSize = 13f
         typeface = Typeface.DEFAULT_BOLD
         setTextColor(Text)
         setPadding(0, dp(14), 0, dp(4))
@@ -1112,17 +1108,17 @@ internal fun MainActivity.settingsPanel(): View {
 internal fun MainActivity.pageHero(title: String, subtitle: String): View =
     LinearLayout(this@pageHero).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(4), dp(2), dp(4), dp(10))
+        setPadding(dp(4), dp(1), dp(4), dp(5))
         layoutParams = full()
         addView(android.widget.TextView(this@pageHero).apply {
             text = title
-            textSize = 16f
+            textSize = 12f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(PrimaryDark)
         })
         addView(android.widget.TextView(this@pageHero).apply {
             text = subtitle
-            textSize = 10f
+            textSize = 8f
             setTextColor(Muted)
             setPadding(0, dp(3), 0, 0)
         })
@@ -1168,8 +1164,8 @@ internal fun MainActivity.header(): View {
         setTextColor(Color.rgb(57, 70, 104))
     })
     top.addView(titleBox, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-    sdkBadge = badge(if (robotReadySoon()) "Robot mode" else "Preview mode", Accent)
-    queueBadge = badge("Queue ${repo.pendingCount()}", Color.rgb(200, 145, 40))
+    sdkBadge = badge(if (robotReadySoon()) "Online" else "Preview", Good)
+    queueBadge = badge("${lastBattery.replace("Battery ", "").ifBlank { "--" }}%", Color.rgb(55, 118, 168))
     recordingBadge = badge(if (isRecording) "Recording" else "Ready", if (isRecording) Danger else Good)
     assistBadge = badge(if (guestAssistEnabled) "Assist on" else "Assist off", if (guestAssistEnabled) Accent else Neutral)
     top.addView(sdkBadge)
@@ -1178,7 +1174,7 @@ internal fun MainActivity.header(): View {
     ).also { it.marginStart = dp(4) })
     top.addView(TextView(this).apply {
         text = "STOP"
-        textSize = 11f
+            textSize = 8f
         typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
         setTextColor(Color.WHITE)
@@ -1192,7 +1188,7 @@ internal fun MainActivity.header(): View {
     })
     box.addView(top)
     statusView = TextView(this).apply {
-        text = "Unit 01  |  ${if (robot.isRobotSdkAvailable) "Online" else "Preview"}  |  ${lastBattery.replace("Battery ", "")}  |  ${SimpleDateFormat("MMM d, h:mm a", Locale.US).format(Date())}"
+        text = "Care Unit 01  |  ${vm.homeBase}  |  ${SimpleDateFormat("MMM d, h:mm a", Locale.US).format(Date())}"
         textSize = 8f
         gravity = Gravity.START
         setTextColor(Color.rgb(57, 70, 104))
