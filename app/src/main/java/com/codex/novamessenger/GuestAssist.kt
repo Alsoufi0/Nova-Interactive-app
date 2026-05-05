@@ -175,6 +175,10 @@ class GuestAssist(private val activity: MainActivity) {
                 activity.startFollowMode()
             }
             isGuideIntent(lower) -> {
+                findResidentFromSpeech(lower)?.let {
+                    startPrivatePatientAccess(it)
+                    return
+                }
                 if (isPrivateRoomRequest(lower)) {
                     activity.speakReply("For privacy, I cannot guide visitors to resident rooms unless a planned visit is verified. Please ask for the resident by full name so I can verify the visit.")
                     return
