@@ -123,12 +123,20 @@ class MessageDelivery(private val activity: MainActivity) {
     }
 
     fun deliverMessage(message: NovaMessage) {
-        activity.setDestinationText(message.destination)
+        val verifiedDestination = activity.careWorkflow.resolveVerifiedMapPoint(message.destination)
+        if (verifiedDestination == null) {
+            activity.setTask("Message destination needed", "Needs setup", message.destination, 0)
+            activity.setStatus("No verified map point for message destination: ${message.destination}.")
+            activity.speakReply("I do not have a verified saved map point for ${message.destination}. Please choose a saved destination before I move.")
+            activity.completeCloudWorkflow("message", "Message delivery blocked: destination ${message.destination} is not a verified map point.", ok = false)
+            return
+        }
+        activity.setDestinationText(verifiedDestination)
         activity.follow.stop()
         activity.setTask("Delivering message", "Navigating", "Play message from visitor", 55)
-        activity.setStatus("Taking message to ${message.destination}...")
+        activity.setStatus("Taking message to $verifiedDestination...")
         val played = AtomicBoolean(false)
-        val result = activity.robot.startNavigation(message.destination) { status ->
+        val result = activity.robot.startNavigation(verifiedDestination) { status ->
             activity.setStatus(status)
             val lower = status.lowercase()
             val arrived = activity.careWorkflow.isArrivalStatus(status)

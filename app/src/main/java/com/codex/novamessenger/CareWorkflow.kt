@@ -115,7 +115,13 @@ class CareWorkflow(private val activity: MainActivity) {
     }
 
     fun runExternalResidentCheckIn(residentId: String, name: String, room: String, mapPoint: String, notes: String, cloudAction: String = "resident_checkin") {
-        val dest = resolveMapPoint(mapPoint.ifBlank { room.ifBlank { activity.destination() } })
+        val requested = mapPoint.ifBlank { room.ifBlank { activity.destination() } }
+        val dest = resolveVerifiedMapPoint(requested) ?: return activity.runOnUiThread {
+            activity.setTask("Room pin needed", "Needs setup", room.ifBlank { requested }, 0)
+            activity.speakReply("I do not have a verified saved map point for ${name.ifBlank { "this resident" }}. Please update the room pin from the care cloud before I move.")
+            activity.setStatus("No verified cloud map point for resident check-in: $requested.")
+            activity.completeCloudWorkflow(cloudAction, "Blocked: no verified map point for $requested.", ok = false)
+        }
         val displayName = name.ifBlank { "the resident" }
         val displayRoom = room.ifBlank { dest }
         val prompt = buildString {
@@ -319,6 +325,15 @@ class CareWorkflow(private val activity: MainActivity) {
             .filter { it.isNotBlank() }
         candidates.forEach { exactMapPoint(it)?.let { point -> return point.name } }
         candidates.forEach { fuzzyMapPoint(it)?.let { point -> return point.name } }
+        return null
+    }
+
+    fun resolveVerifiedMapPoint(destination: String): String? {
+        val clean = destination.trim()
+        if (clean.isBlank()) return null
+        if (activity.lastMapPoints.isEmpty()) return clean
+        exactMapPoint(clean)?.let { return it.name }
+        fuzzyMapPoint(clean)?.let { return it.name }
         return null
     }
 
